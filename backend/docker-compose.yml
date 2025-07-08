@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  backend:
+    build: .
+    ports:
+      - "9696:9696"
+    environment:
+      - DATABASE_URL=postgresql://pixelcanvas:pixelcanvas@localhost/pixelcanvas
+      - SECRET_KEY=your-secret-key-change-this-in-production
+    volumes:
+      - ./:/app
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=pixelcanvas
+      - POSTGRES_USER=pixelcanvas
+      - POSTGRES_PASSWORD=pixelcanvas
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+volumes:
+  postgres_data: 

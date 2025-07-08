@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Checksum Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+        }
+        .test-section {
+            background: white;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        button {
+            background: #4a9eff;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 10px;
+        }
+        button:hover {
+            background: #3a8eef;
+        }
+        pre {
+            background: #f0f0f0;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .success {
+            color: green;
+        }
+        .error {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+    <h1>Checksum Testing Tool</h1>
+    
+    <div class="test-section">
+        <h2>Test 1: Get Tile Data with Checksum</h2>
+        <p>Fetch a tile at position (0,0) and display its checksum</p>
+        <button id="test1">Run Test</button>
+        <pre id="test1Result">Results will appear here...</pre>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test 2: Place Pixel with Checksum Validation</h2>
+        <p>Place a pixel at (10,10) with a color and verify checksum validation</p>
+        <button id="test2">Run Test</button>
+        <pre id="test2Result">Results will appear here...</pre>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test 3: Batch Verify Checksums</h2>
+        <p>Test the checksum verification endpoint</p>
+        <button id="test3">Run Test</button>
+        <pre id="test3Result">Results will appear here...</pre>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test 4: Deliberate Checksum Mismatch</h2>
+        <p>Attempt to place a pixel with an incorrect checksum</p>
+        <button id="test4">Run Test</button>
+        <pre id="test4Result">Results will appear here...</pre>
+    </div>
+
+    <script>
+        // Helper function to format JSON nicely
+        function formatJSON(json) {
+            return JSON.stringify(json, null, 2);
+        }
+        
+        // Test 1: Get Tile with Checksum
+        document.getElementById('test1').addEventListener('click', async () => {
+            const resultElement = document.getElementById('test1Result');
+            resultElement.textContent = 'Fetching tile data...';
+            
+            try {
+                const response = await fetch('get_state.php?tile_x=0&tile_y=0');
+                const data = await response.json();
+                
+                if (data.success) {
+                    resultElement.innerHTML = `<span class="success">Success!</span>\nTile checksum: ${data.checksum}\n\nFull response:\n${formatJSON(data)}`;
+                } else {
+                    resultElement.innerHTML = `<span class="error">Error:</span>\n${formatJSON(data)}`;
+                }
+            } catch (error) {
+                resultElement.innerHTML = `<span class="error">Error:</span>\n${error.message}`;
+            }
+        });
+        
+        // Test 2: Place Pixel with Valid Checksum
+        document.getElementById('test2').addEventListener('click', async () => {
+            const resultElement = document.getElementById('test2Result');
+            resultElement.textContent = 'Step 1: Fetching current tile checksum...';
+            
+            try {
+                // First get the current checksum
+                const tileResponse = await fetch('get_state.php?tile_x=0&tile_y=0');
+                const tileData = await tileResponse.json();
+                
+                if (!tileData.success) {
+                    resultElement.innerHTML = `<span class="error">Error getting checksum:</span>\n${formatJSON(tileData)}`;
+                    return;
+                }
+                
+                const checksum = tileData.checksum;
+                resultElement.textContent = `Got checksum: ${checksum}\nStep 2: Placing pixel with this checksum...`;
+                
+                // Now place a pixel with this checksum
+                const pixelData = {
+                    x: 10,
+                    y: 10,
+                    r: 255,
+                    g: 0,
+                    b: 0,
+                    checksum: checksum
+                };
+                
+                const placeResponse = await fetch('set_pixel.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(pixelData)
+                });
+                
+                const placeData = await placeResponse.json();
+                
+                if (placeData.success) {
+                    resultElement.innerHTML = `<span class="success">Pixel placed successfully!</span>\nNew checksum: ${placeData.checksum}\n\nFull response:\n${formatJSON(placeData)}`;
+                } else {
+                    resultElement.innerHTML = `<span class="error">Error placing pixel:</span>\n${formatJSON(placeData)}`;
+                }
+            } catch (error) {
+                resultElement.innerHTML = `<span class="error">Error:</span>\n${error.message}`;
+            }
+        });
+        
+        // Test 3: Batch Verify Checksums
+        document.getElementById('test3').addEventListener('click', async () => {
+            const resultElement = document.getElementById('test3Result');
+            resultElement.textContent = 'Step 1: Getting checksums for tiles (0,0) and (1,1)...';
+            
+            try {
+                // Get checksums for two tiles
+                const tile1Response = await fetch('get_state.php?tile_x=0&tile_y=0');
+                const tile1Data = await tile1Response.json();
+                
+                const tile2Response = await fetch('get_state.php?tile_x=1&tile_y=1');
+                const tile2Data = await tile2Response.json();
+                
+                if (!tile1Data.success || !tile2Data.success) {
+                    resultElement.innerHTML = `<span class="error">Error getting checksums</span>`;
+                    return;
+                }
+                
+                const checksums = {
+                    '0,0': tile1Data.checksum,
+                    '1,1': tile2Data.checksum
+                };
+                
+                resultElement.textContent = `Got checksums: ${formatJSON(checksums)}\nStep 2: Verifying checksums...`;
+                
+                // Verify checksums
+                const verifyResponse = await fetch('get_state.php?verify_checksums=1', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ checksums })
+                });
+                
+                const verifyData = await verifyResponse.json();
+                
+                if (verifyData.success) {
+                    resultElement.innerHTML = `<span class="success">Verification successful!</span>\nOutdated tiles: ${Object.keys(verifyData.outdatedTiles || {}).length}\n\nFull response:\n${formatJSON(verifyData)}`;
+                } else {
+                    resultElement.innerHTML = `<span class="error">Error verifying checksums:</span>\n${formatJSON(verifyData)}`;
+                }
+            } catch (error) {
+                resultElement.innerHTML = `<span class="error">Error:</span>\n${error.message}`;
+            }
+        });
+        
+        // Test 4: Deliberate Checksum Mismatch
+        document.getElementById('test4').addEventListener('click', async () => {
+            const resultElement = document.getElementById('test4Result');
+            resultElement.textContent = 'Testing with invalid checksum...';
+            
+            try {
+                // Place a pixel with an obviously wrong checksum
+                const pixelData = {
+                    x: 20,
+                    y: 20,
+                    r: 0,
+                    g: 0,
+                    b: 255,
+                    checksum: 'invalid_checksum_value'
+                };
+                
+                const response = await fetch('set_pixel.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(pixelData)
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    resultElement.innerHTML = `<span class="error">Test failed: Pixel was placed despite invalid checksum</span>\n${formatJSON(data)}`;
+                } else if (data.error === 'checksum_mismatch') {
+                    resultElement.innerHTML = `<span class="success">Test passed: Server correctly rejected the invalid checksum</span>\nCurrent checksum: ${data.checksum}\n\nFull response:\n${formatJSON(data)}`;
+                } else {
+                    resultElement.innerHTML = `<span class="error">Unexpected error:</span>\n${formatJSON(data)}`;
+                }
+            } catch (error) {
+                resultElement.innerHTML = `<span class="error">Error:</span>\n${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html> 

@@ -1,0 +1,11 @@
+.env.production
+.env.development
+.env.test
+.env.local
+.env.staging
+.env.production
+.env.development
+.env.test
+.env.local
+.env.staging
+.env.php

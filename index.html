@@ -1,0 +1,1849 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pixel Canvas</title>
+    <style>
+        :root {
+            --bg-color: #1a1a1a;
+            --text-color: #e0e0e0;
+            --accent-color: #4a9eff;
+            --error-color: #ff4444;
+            --success-color: #44ff44;
+            --warning-color: #ffaa00;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            background-color: rgba(0, 0, 0, 0.4);
+            
+            border-bottom: 1px solid #333;
+            z-index: 10;
+        }
+
+        .toolbar-section {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .color-palette {
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
+            max-width: 50vw;
+        }
+
+        .color-button {
+            width: 24px;
+            height: 24px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: transform 0.1s;
+            margin: 2px;
+            position: relative;
+        }
+
+        .color-button:hover {
+            transform: scale(1.1);
+        }
+
+        .color-button.selected {
+            box-shadow: 0 0 0 2px white, 0 0 0 4px black;
+            transform: scale(1.1);
+        }
+
+        .current-color-display {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-right: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 5px;
+            border-radius: 4px;
+            border: 1px solid #444;
+        }
+
+        #currentColorPreview {
+            width: 36px;
+            height: 36px;
+            border-radius: 4px;
+            border: 1px solid #666;
+            margin-bottom: 3px;
+            background-color: #FF4500;
+        }
+
+        #currentColorText {
+            font-size: 12px;
+            font-family: monospace;
+        }
+
+        .custom-color-picker {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            margin-left: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 5px;
+            border-radius: 4px;
+            border: 1px solid #444;
+        }
+
+        #customColorInput {
+            width: 36px;
+            height: 36px;
+            border: none;
+            background: none;
+            padding: 0;
+            cursor: pointer;
+        }
+
+        #addCustomColorBtn {
+            width: 28px;
+            height: 28px;
+            padding: 0;
+            font-size: 16px;
+        }
+
+        .canvas-container {
+            position: relative;
+            flex: 1;
+            overflow: hidden;
+            background: #0a0a0a;
+            cursor: crosshair;
+        }
+
+        .pixel-canvas {
+            position: absolute;
+            transform-origin: 0 0;
+            image-rendering: pixelated;
+        }
+
+        .tile {
+            position: absolute;
+            image-rendering: pixelated;
+            background-color: rgba(255,255,255,0.05);
+        }
+
+        .coordinates {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            z-index: 5;
+        }
+
+        .controls {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            z-index: 5;
+        }
+
+        .control-btn {
+            width: 36px;
+            height: 36px;
+            background: rgba(0, 0, 0, 0.7);
+            color: var(--text-color);
+            border: 1px solid #333;
+            border-radius: 4px;
+            font-size: 18px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .stats {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            z-index: 5;
+            visibility: hidden; /* Hide stats until loaded */
+        }
+
+        .notification {
+            position: fixed;
+            top: 70px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 4px;
+            max-width: 300px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+            transition: transform 0.3s, opacity 0.3s;
+            animation: slideIn 0.3s forwards;
+        }
+
+        .notification.error {
+            border-left: 3px solid var(--error-color);
+        }
+
+        .notification.success {
+            border-left: 3px solid var(--success-color);
+        }
+
+        .notification.warning {
+            border-left: 3px solid var(--warning-color);
+        }
+
+        .fade-out {
+            animation: fadeOut 0.5s forwards;
+        }
+
+        .loading {
+            position: fixed;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 8px 15px;
+            border-radius: 4px;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+
+        .loading.visible {
+            opacity: 1;
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        @keyframes fadeOut {
+            from { opacity: 1; }
+            to { opacity: 0; transform: translateY(-20px); }
+        }
+
+        @media (max-width: 768px) {
+            .toolbar {
+                flex-direction: column;
+                gap: 10px;
+                align-items: flex-start;
+            }
+            
+            .color-palette {
+                max-width: 100%;
+            }
+            
+            .current-color-display {
+                flex-direction: row;
+                width: 100%;
+                justify-content: center;
+                margin-right: 0;
+                margin-bottom: 5px;
+            }
+            
+            #currentColorPreview {
+                margin-bottom: 0;
+                margin-right: 10px;
+            }
+            
+            .custom-color-picker {
+                margin-left: 0;
+                margin-top: 5px;
+                width: 100%;
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="toolbar">
+        <div class="toolbar-section">
+            <div class="current-color-display">
+                <div id="currentColorPreview"></div>
+                <div id="currentColorText">#FF4500</div>
+            </div>
+            <div class="color-palette" id="colorPalette">
+                <button class="color-button" style="background-color: #BE0039"></button>
+                <button class="color-button selected" style="background-color: #FF4500"></button>
+                <button class="color-button" style="background-color: #FFA800"></button>
+                <button class="color-button" style="background-color: #FFD635"></button>
+                <button class="color-button" style="background-color: #00A368"></button>
+                <button class="color-button" style="background-color: #00CC78"></button>
+                <button class="color-button" style="background-color: #7EED56"></button>
+                <button class="color-button" style="background-color: #51E9F4"></button>
+                <button class="color-button" style="background-color: #3690EA"></button>
+                <button class="color-button" style="background-color: #2450A4"></button>
+                <button class="color-button" style="background-color: #B44AC0"></button>
+                <button class="color-button" style="background-color: #FF99AA"></button>
+                <button class="color-button" style="background-color: #000000"></button>
+                <button class="color-button" style="background-color: #898D90"></button>
+                <button class="color-button" style="background-color: #FFFFFF"></button>
+            </div>
+            <div class="custom-color-picker">
+                <input type="color" id="customColorInput" value="#FF4500">
+                <button id="addCustomColorBtn" class="control-btn" title="Use Custom Color">+</button>
+            </div>
+        </div>
+        <div class="toolbar-section">
+            <button id="debugBtn" class="control-btn">🔍</button>
+            <button id="resetBtn" class="control-btn">⟲</button>
+        </div>
+    </div>
+
+    <div class="canvas-container" id="canvasContainer">
+        <div class="pixel-canvas" id="pixelCanvas"></div>
+        <div class="coordinates" id="coordinates">X: 0, Y: 0</div>
+        <div class="controls">
+            <button class="control-btn" id="zoomInBtn">+</button>
+            <button class="control-btn" id="zoomOutBtn">-</button>
+        </div>
+        <div class="stats" id="stats">Loading stats...</div>
+    </div>
+
+    <div class="loading" id="loading">Loading tiles...</div>
+
+    <script>
+        // Configuration
+        const TILE_SIZE = 32; // Match the PHP server's tile size
+        const BOARD_SIZE = 1000; // Match the PHP server's canvas size
+        const TILE_COUNT = BOARD_SIZE / TILE_SIZE;
+        
+        // State variables
+        let scale = 1;
+        let offsetX = 0;
+        let offsetY = 0;
+        let selectedColor = '#000000';
+        let lastUpdateTimestamp = 0;
+        let isDragging = false;
+        let dragStartX = 0;
+        let dragStartY = 0;
+        let dragStartOffsetX = 0;
+        let dragStartOffsetY = 0;
+        let loadedTiles = new Set();
+        let tileElements = {};
+        let visibleTiles = new Set();
+        
+        // Movement state for WASD controls
+        const keyState = {
+            w: false,
+            a: false,
+            s: false,
+            d: false
+        };
+        let movementAnimationFrame = null;
+        let lastMoveTime = 0;
+        
+        // Add a tracker for tile update timestamps to avoid race conditions
+        const tileUpdateTimestamps = {};
+        
+        // Add tile checksum tracking to the state variables
+        let tileChecksums = {};
+        
+        // Add these variables to the state variables section (around line 224)
+        let lastPlacedTile = null;
+        let tileLocalChanges = {};
+        let consecutivePlacementMode = false;
+        let batchPlacementInProgress = false;
+        
+        // DOM Elements
+        const canvasContainer = document.getElementById('canvasContainer');
+        const pixelCanvas = document.getElementById('pixelCanvas');
+        const colorPalette = document.getElementById('colorPalette');
+        const coordinates = document.getElementById('coordinates');
+        const stats = document.getElementById('stats');
+        const zoomInBtn = document.getElementById('zoomInBtn');
+        const zoomOutBtn = document.getElementById('zoomOutBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const debugBtn = document.getElementById('debugBtn');
+        const loading = document.getElementById('loading');
+        
+        // Initialize the application
+        init();
+        
+        function init() {
+            // Setup initial canvas state
+            updateCanvasTransform();
+
+            // Setup initial canvas state
+            updateCanvasTransform();
+            
+            // Add checker pattern style
+            addCheckerPatternStyle();
+    
+            
+            // Setup color palette (use existing HTML buttons now)
+            initColorPalette();
+            
+            // Setup event listeners
+            setupEventListeners();
+            
+            // Start app by centering and loading board
+            centerCanvas();
+            fetchBoardInfo()
+                .then(() => {
+                    updateVisibleTiles();
+                    loadVisibleTiles();
+                    startUpdateCycle();
+                })
+                .catch(err => {
+                    showNotification('Failed to initialize canvas. ' + err.message, 'error');
+                    console.error('Initialization error:', err);
+                    
+                    // Try to continue anyway with defaults
+                    updateVisibleTiles();
+                    loadVisibleTiles();
+                    startUpdateCycle();
+                });
+        }
+        
+        function initColorPalette() {
+            // Since we now use static HTML buttons, just set up event listeners
+            document.querySelectorAll('.color-button').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    // Remove selected from all buttons
+                    document.querySelectorAll('.color-button').forEach(b => b.classList.remove('selected'));
+                    // Add selected to this button
+                    btn.classList.add('selected');
+                    // Update selected color
+                    selectedColor = btn.style.backgroundColor;
+                    
+                    // Convert RGB to hex if needed
+                    if (selectedColor.startsWith('rgb')) {
+                        const rgb = selectedColor.match(/\d+/g).map(Number);
+                        selectedColor = rgbToHex(rgb[0], rgb[1], rgb[2]);
+                    }
+                    
+                    // Update the current color display
+                    updateColorDisplay(selectedColor);
+                });
+            });
+            
+            // Use first button's color as default
+            const firstBtn = document.querySelector('.color-button');
+            if (firstBtn) {
+                selectedColor = firstBtn.style.backgroundColor;
+                // Convert RGB to hex if needed
+                if (selectedColor.startsWith('rgb')) {
+                    const rgb = selectedColor.match(/\d+/g).map(Number);
+                    selectedColor = rgbToHex(rgb[0], rgb[1], rgb[2]);
+                }
+                
+                // Initialize the current color display
+                updateColorDisplay(selectedColor);
+            }
+            
+            // Set up custom color picker
+            const customColorInput = document.getElementById('customColorInput');
+            const addCustomColorBtn = document.getElementById('addCustomColorBtn');
+            
+            // Update custom color input to match the initial color
+            customColorInput.value = selectedColor;
+            
+            // When color input changes, update the preview but don't select yet
+            customColorInput.addEventListener('input', () => {
+                customColorInput.style.backgroundColor = customColorInput.value;
+            });
+            
+            // When add button is clicked, select the custom color
+            addCustomColorBtn.addEventListener('click', () => {
+                // Remove selected from all buttons
+                document.querySelectorAll('.color-button').forEach(b => b.classList.remove('selected'));
+                
+                // Update selected color
+                selectedColor = customColorInput.value;
+                
+                // Update the current color display
+                updateColorDisplay(selectedColor);
+            });
+        }
+        
+        // Helper function to convert RGB to hex
+        function rgbToHex(r, g, b) {
+            return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
+        }
+        
+        function setupEventListeners() {
+            // Add a setup button
+            const setupBtn = document.createElement('button');
+            setupBtn.id = 'setupBtn';
+            setupBtn.className = 'control-btn';
+            setupBtn.textContent = '🔧';
+            setupBtn.title = 'Database Setup';
+            setupBtn.style.marginLeft = '5px';
+            document.querySelector('.toolbar-section:last-child').appendChild(setupBtn);
+            
+            setupBtn.addEventListener('click', () => {
+                window.open('db_setup.php', '_blank');
+            });
+            
+            // Canvas interaction events
+            canvasContainer.addEventListener('mousedown', handleMouseDown);
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', handleMouseUp);
+            canvasContainer.addEventListener('click', handleCanvasClick);
+            canvasContainer.addEventListener('contextmenu', e => e.preventDefault());
+            
+            // Add this new listener for continuous drawing
+            canvasContainer.addEventListener('mousemove', handleCanvasMouseMove);
+            
+            // Mobile touch events
+            canvasContainer.addEventListener('touchstart', handleTouchStart);
+            document.addEventListener('touchmove', handleTouchMove);
+            document.addEventListener('touchend', handleTouchEnd);
+            
+            // Zoom buttons
+            zoomInBtn.addEventListener('click', () => {
+                scale = Math.min(scale * 1.5, 20);
+                updateCanvasTransform();
+                updateVisibleTiles();
+                loadVisibleTiles();
+            });
+            
+            zoomOutBtn.addEventListener('click', () => {
+                scale = Math.max(scale / 1.5, 0.25);
+                updateCanvasTransform();
+                updateVisibleTiles();
+                loadVisibleTiles();
+            });
+            
+            // Mouse wheel for zooming
+            canvasContainer.addEventListener('wheel', handleWheel, { passive: false });
+            
+            // Reset button
+            resetBtn.addEventListener('click', centerCanvas);
+            
+            // Debug button
+            debugBtn.addEventListener('click', () => {
+                window.open('monitor.php', '_blank');
+            });
+            
+            // Keyboard controls (WASD)
+            window.addEventListener('keydown', handleKeyDown);
+            window.addEventListener('keyup', handleKeyUp);
+            
+            // Window resize
+            window.addEventListener('resize', handleResize);
+        }
+
+        function addCheckerPatternStyle() {
+            // Create a small checker pattern as a data URL
+            const canvas = document.createElement('canvas');
+            const size = 8; // Size of the checker pattern (8x8 pixels)
+            canvas.width = size * 2;
+            canvas.height = size * 2;
+            
+            const ctx = canvas.getContext('2d');
+            // Fill with dark gray
+            ctx.fillStyle = '#222222';
+            ctx.fillRect(0, 0, size * 2, size * 2);
+            
+            // Add light gray checkers
+            ctx.fillStyle = '#444444';
+            ctx.fillRect(0, 0, size, size);
+            ctx.fillRect(size, size, size, size);
+            
+            // Convert to data URL
+            const dataURL = canvas.toDataURL('image/png');
+            
+            // Create and inject the CSS
+            const style = document.createElement('style');
+            style.textContent = `
+                .tile {
+                    position: absolute;
+                    image-rendering: pixelated;
+                    background-image: url('${dataURL}');
+                    background-repeat: repeat;
+                }
+            `;
+            
+            document.head.appendChild(style);
+        }
+
+        function renderEmptyTile(tileKey) {
+            const tile = tileElements[tileKey];
+            if (!tile) return;
+            
+            const ctx = tile.getContext('2d');
+            
+            // Clear the tile with transparent background to show the checker pattern
+            ctx.clearRect(0, 0, TILE_SIZE, TILE_SIZE);
+            
+            // Draw grid lines only
+            ctx.strokeStyle = '#666666';
+            ctx.lineWidth = 0.5;
+            
+            // Draw grid lines
+            for (let i = 0; i <= TILE_SIZE; i += 16) {
+                // Vertical line
+                ctx.beginPath();
+                ctx.moveTo(i, 0);
+                ctx.lineTo(i, TILE_SIZE);
+                ctx.stroke();
+                
+                // Horizontal line
+                ctx.beginPath();
+                ctx.moveTo(0, i);
+                ctx.lineTo(TILE_SIZE, i);
+                ctx.stroke();
+            }
+        }
+
+        
+        function handleMouseDown(e) {
+            if (e.button === 0) { // Left click
+                // Will be handled by click event for placing pixels
+            } else if (e.button === 1 || e.button === 2) { // Middle or right click for panning
+                e.preventDefault();
+                isDragging = true;
+                dragStartX = e.clientX;
+                dragStartY = e.clientY;
+                dragStartOffsetX = offsetX;
+                dragStartOffsetY = offsetY;
+                canvasContainer.style.cursor = 'grabbing';
+            }
+        }
+        
+        function handleMouseMove(e) {
+            updateCursorPosition(e.clientX, e.clientY);
+            
+            if (isDragging) {
+                offsetX = dragStartOffsetX + (e.clientX - dragStartX);
+                offsetY = dragStartOffsetY + (e.clientY - dragStartY);
+                updateCanvasTransform();
+            }
+        }
+        
+        function handleMouseUp() {
+            if (isDragging) {
+                isDragging = false;
+                canvasContainer.style.cursor = 'crosshair';
+                updateVisibleTiles();
+                loadVisibleTiles();
+            }
+        }
+        
+        function handleCanvasClick(e) {
+            if (e.shiftKey) {
+                // When shift is held, enter/exit continuous placement mode
+                consecutivePlacementMode = !consecutivePlacementMode;
+                if (consecutivePlacementMode) {
+                    showNotification('Continuous placement mode activated - click and drag to place pixels', 'info', 1500);
+                } else {
+                    showNotification('Continuous placement mode deactivated', 'info', 1500);
+                }
+                return;
+            }
+            
+            const rect = canvasContainer.getBoundingClientRect();
+            const canvasX = Math.floor((e.clientX - rect.left - offsetX) / scale);
+            const canvasY = Math.floor((e.clientY - rect.top - offsetY) / scale);
+            
+            // Ensure coordinates are within board bounds
+            if (canvasX >= 0 && canvasX < BOARD_SIZE && canvasY >= 0 && canvasY < BOARD_SIZE) {
+                placePixel(canvasX, canvasY);
+            }
+        }
+        
+        function handleTouchStart(e) {
+            if (e.touches.length === 1) {
+                // Single touch for placing pixels will be handled by click handler
+            } else if (e.touches.length === 2) {
+                // Enable panning with two fingers
+                e.preventDefault();
+                isDragging = true;
+                dragStartX = e.touches[0].clientX;
+                dragStartY = e.touches[0].clientY;
+                dragStartOffsetX = offsetX;
+                dragStartOffsetY = offsetY;
+            }
+        }
+        
+        function handleTouchMove(e) {
+            if (e.touches.length === 1) {
+                updateCursorPosition(e.touches[0].clientX, e.touches[0].clientY);
+            }
+            
+            if (isDragging && e.touches.length >= 1) {
+                e.preventDefault();
+                offsetX = dragStartOffsetX + (e.touches[0].clientX - dragStartX);
+                offsetY = dragStartOffsetY + (e.touches[0].clientY - dragStartY);
+                updateCanvasTransform();
+            }
+        }
+        
+        function handleTouchEnd() {
+            if (isDragging) {
+                isDragging = false;
+                updateVisibleTiles();
+                loadVisibleTiles();
+            }
+        }
+        
+        function handleWheel(e) {
+            e.preventDefault();
+            
+            // Get cursor position relative to canvas before zoom
+            const rect = canvasContainer.getBoundingClientRect();
+            const cursorX = e.clientX - rect.left;
+            const cursorY = e.clientY - rect.top;
+            
+            // Calculate cursor position in board space
+            const boardX = (cursorX - offsetX) / scale;
+            const boardY = (cursorY - offsetY) / scale;
+            
+            // Adjust scale based on wheel direction
+            const scaleFactor = e.deltaY < 0 ? 1.1 : 0.9;
+            scale = Math.max(0.25, Math.min(20, scale * scaleFactor));
+            
+            // Calculate new cursor position after scale
+            const newCursorX = boardX * scale + offsetX;
+            const newCursorY = boardY * scale + offsetY;
+            
+            // Adjust offset to zoom toward cursor
+            offsetX += cursorX - newCursorX;
+            offsetY += cursorY - newCursorY;
+            
+            updateCanvasTransform();
+            updateVisibleTiles();
+            loadVisibleTiles();
+        }
+        
+        function handleKeyDown(e) {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            
+            const key = e.key.toLowerCase();
+            
+            if (key === 'w' || key === 'a' || key === 's' || key === 'd') {
+                e.preventDefault();
+                keyState[key] = true;
+                
+                if (!movementAnimationFrame) {
+                    lastMoveTime = performance.now();
+                    movementAnimationFrame = requestAnimationFrame(handleSmoothMovement);
+                }
+            }
+        }
+        
+        function handleKeyUp(e) {
+            const key = e.key.toLowerCase();
+            
+            if (key === 'w' || key === 'a' || key === 's' || key === 'd') {
+                keyState[key] = false;
+                
+                if (!keyState.w && !keyState.a && !keyState.s && !keyState.d) {
+                    if (movementAnimationFrame) {
+                        cancelAnimationFrame(movementAnimationFrame);
+                        movementAnimationFrame = null;
+                    }
+                    
+                    updateVisibleTiles();
+                    loadVisibleTiles();
+                }
+            }
+        }
+        
+        function handleSmoothMovement() {
+            const now = performance.now();
+            const deltaTime = now - lastMoveTime;
+            lastMoveTime = now;
+            
+            // Scale speed inversely with zoom level (faster when zoomed in)
+            const baseSpeed = 120;
+            const moveSpeed = baseSpeed * (deltaTime / 1000) / (1 / scale);
+            
+            let moved = false;
+            
+            if (keyState.w) {
+                offsetY += moveSpeed;
+                moved = true;
+            }
+            
+            if (keyState.s) {
+                offsetY -= moveSpeed;
+                moved = true;
+            }
+            
+            if (keyState.a) {
+                offsetX += moveSpeed;
+                moved = true;
+            }
+            
+            if (keyState.d) {
+                offsetX -= moveSpeed;
+                moved = true;
+            }
+            
+            if (moved) {
+                updateCanvasTransform();
+                
+                // Only update visible tiles occasionally during movement
+                if (now % 200 < 20) {
+                    updateVisibleTiles();
+                    loadVisibleTiles();
+                }
+                
+                movementAnimationFrame = requestAnimationFrame(handleSmoothMovement);
+            } else {
+                movementAnimationFrame = null;
+            }
+        }
+        
+        function handleResize() {
+            updateCanvasTransform();
+            updateVisibleTiles();
+            loadVisibleTiles();
+        }
+        
+        function updateCursorPosition(clientX, clientY) {
+            const rect = canvasContainer.getBoundingClientRect();
+            const canvasX = Math.floor((clientX - rect.left - offsetX) / scale);
+            const canvasY = Math.floor((clientY - rect.top - offsetY) / scale);
+            
+            if (canvasX >= 0 && canvasX < BOARD_SIZE && canvasY >= 0 && canvasY < BOARD_SIZE) {
+                coordinates.textContent = `X: ${canvasX}, Y: ${canvasY}`;
+            } else {
+                coordinates.textContent = 'Out of bounds';
+            }
+        }
+        
+        function updateCanvasTransform() {
+            pixelCanvas.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
+        }
+        
+        function centerCanvas() {
+            const container = canvasContainer.getBoundingClientRect();
+            scale = 1;
+            offsetX = (container.width / 2) - (BOARD_SIZE * scale / 2);
+            offsetY = (container.height / 2) - (BOARD_SIZE * scale / 2);
+            updateCanvasTransform();
+            updateVisibleTiles();
+            loadVisibleTiles();
+        }
+        
+        async function fetchBoardInfo() {
+            showLoading(true);
+            
+            try {
+                const response = await fetch('get_state.php?info=1');
+                
+                if (!response.ok) {
+                    throw new Error(`Server responded with status: ${response.status}`);
+                }
+                
+                const text = await response.text();
+                
+                // Handle empty response
+                if (!text.trim()) {
+                    console.warn("Empty response from server");
+                    return;
+                }
+                
+                // Handle PHP warnings mixed with JSON
+                let data;
+                try {
+                    let cleanText = text;
+                    
+                    // If there are PHP warnings, extract just the JSON part
+                    if (text.includes('<br />') && text.includes('{"success"')) {
+                        cleanText = text.substring(text.indexOf('{"success"'));
+                        console.warn("Cleaned PHP warnings from response");
+                    }
+                    
+                    data = JSON.parse(cleanText);
+                    
+                    if (data.success) {
+                        lastUpdateTimestamp = data.timestamp || 0;
+                        console.log("Board info loaded", data);
+                    } else {
+                        console.warn("Server returned success=false", data);
+                    }
+                } catch (parseError) {
+                    console.error("JSON parse error:", parseError);
+                    console.error("Raw response:", text);
+                    throw new Error("Failed to parse server response");
+                }
+            } catch (error) {
+                console.error("Error fetching board info:", error);
+                throw error;
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        function updateVisibleTiles() {
+            // Clear previous visible tiles
+            visibleTiles.clear();
+            
+            const rect = canvasContainer.getBoundingClientRect();
+            
+            // Calculate visible tile range
+            const minVisibleX = Math.floor((0 - offsetX) / scale / TILE_SIZE);
+            const minVisibleY = Math.floor((0 - offsetY) / scale / TILE_SIZE);
+            const maxVisibleX = Math.ceil((rect.width - offsetX) / scale / TILE_SIZE);
+            const maxVisibleY = Math.ceil((rect.height - offsetY) / scale / TILE_SIZE);
+            
+            // Clamp to board boundaries and add buffer
+            const startTileX = Math.max(0, minVisibleX - 1);
+            const startTileY = Math.max(0, minVisibleY - 1);
+            const endTileX = Math.min(TILE_COUNT - 1, maxVisibleX + 1);
+            const endTileY = Math.min(TILE_COUNT - 1, maxVisibleY + 1);
+            
+            // Add all visible tiles
+            for (let tileY = startTileY; tileY <= endTileY; tileY++) {
+                for (let tileX = startTileX; tileX <= endTileX; tileX++) {
+                    visibleTiles.add(`${tileX},${tileY}`);
+                }
+            }
+        }
+        
+        function loadVisibleTiles() {
+            // Load all currently visible tiles
+            for (const tileKey of visibleTiles) {
+                loadTile(tileKey);
+            }
+        }
+        
+        async function loadTile(tileKey, forceReload = false) {
+            // Skip if already loaded and not forcing a reload
+            if (loadedTiles.has(tileKey) && !forceReload) return;
+            
+            const [tileX, tileY] = tileKey.split(',').map(Number);
+            
+            // Save the request timestamp to detect race conditions
+            const requestTimestamp = Date.now();
+            
+            // Mark as loading to prevent duplicate requests
+            loadedTiles.add(tileKey);
+            
+            // Create the tile element if it doesn't exist
+            if (!tileElements[tileKey]) {
+                const tile = document.createElement('canvas');
+                tile.width = TILE_SIZE;
+                tile.height = TILE_SIZE;
+                tile.className = 'tile';
+                tile.style.left = `${tileX * TILE_SIZE}px`;
+                tile.style.top = `${tileY * TILE_SIZE}px`;
+                
+                pixelCanvas.appendChild(tile);
+                tileElements[tileKey] = tile;
+            }
+            
+            // Load tile data from server with retries
+            let retryCount = 0;
+            const maxRetries = 2;
+            
+            while (retryCount <= maxRetries) {
+                try {
+                    showLoading(true);
+                    
+                    // Add timestamp to prevent caching issues
+                    const timestamp = Date.now();
+                    const response = await fetch(`get_state.php?tile_x=${tileX}&tile_y=${tileY}&t=${timestamp}`);
+                    
+                    if (!response.ok) {
+                        if (response.status === 500 && retryCount < maxRetries) {
+                            // Server error - retry after delay
+                            retryCount++;
+                            await new Promise(resolve => setTimeout(resolve, 500 * retryCount));
+                            continue;
+                        }
+                        
+                        // If we've reached max retries or it's not a 500 error
+                        if (retryCount === 0) {
+                            console.error(`Error loading tile ${tileKey}: Server responded with status: ${response.status}`);
+                        }
+                        
+                        // Just render an empty tile and continue
+                        renderEmptyTile(tileKey);
+                        return;
+                    }
+                    
+                    const text = await response.text();
+                    
+                    // Handle empty response
+                    if (!text.trim()) {
+                        renderEmptyTile(tileKey);
+                        return;
+                    }
+                    
+                    // Handle PHP warnings mixed with JSON
+                    try {
+                        let cleanText = text;
+                        
+                        // If there are PHP warnings, extract just the JSON part
+                        if (text.includes('<br />') && text.includes('{"success"')) {
+                            cleanText = text.substring(text.indexOf('{"success"'));
+                        }
+                        
+                        const data = JSON.parse(cleanText);
+                        
+                        // Check if there was a more recent local update to this tile
+                        // If so, don't overwrite it with the server data
+                        const lastLocalUpdate = tileUpdateTimestamps[tileKey] || 0;
+                        const shouldRender = forceReload || !lastLocalUpdate || lastLocalUpdate < requestTimestamp;
+                        
+                        if (data.success && shouldRender) {
+                            renderTile(tileKey, data.pixels || [], false);
+                            
+                            // Store the checksum if available
+                            if (data.checksum) {
+                                tileChecksums[tileKey] = data.checksum;
+                            }
+                            
+                            if (data.timestamp > lastUpdateTimestamp) {
+                                lastUpdateTimestamp = data.timestamp;
+                            }
+                            
+                            // Successfully loaded the tile
+                            break;
+                        } else if (!data.success) {
+                            renderEmptyTile(tileKey);
+                            if (data.error) {
+                                console.warn(`Server returned error for tile ${tileKey}: ${data.error}`);
+                            }
+                            break;
+                        } else {
+                            // We had a more recent local update, don't overwrite
+                            console.log(`Skipping update for tile ${tileKey} due to more recent local change`);
+                            break;
+                        }
+                    } catch (parseError) {
+                        console.error(`Error parsing tile ${tileKey}:`, parseError);
+                        console.error("Raw response:", text);
+                        if (retryCount < maxRetries) {
+                            retryCount++;
+                            await new Promise(resolve => setTimeout(resolve, 500 * retryCount));
+                            continue;
+                        }
+                        renderEmptyTile(tileKey);
+                        break;
+                    }
+                } catch (error) {
+                    console.error(`Error loading tile ${tileKey}:`, error);
+                    if (retryCount < maxRetries) {
+                        retryCount++;
+                        await new Promise(resolve => setTimeout(resolve, 500 * retryCount));
+                        continue;
+                    }
+                    loadedTiles.delete(tileKey);
+                    renderEmptyTile(tileKey);
+                    break;
+                } finally {
+                    showLoading(false);
+                }
+            }
+        }
+        
+        function renderEmptyTile(tileKey) {
+            const tile = tileElements[tileKey];
+            if (!tile) return;
+            
+            const ctx = tile.getContext('2d');
+            
+            // Clear the tile first
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+            
+            // Create a checker pattern
+            ctx.fillStyle = '#333333';
+            const checkerSize = 4; // Size of each checker square
+            
+            for (let y = 0; y < TILE_SIZE; y += checkerSize) {
+                for (let x = 0; x < TILE_SIZE; x += checkerSize) {
+                    // Only fill alternate squares to create checker pattern
+                    if ((Math.floor(x / checkerSize) + Math.floor(y / checkerSize)) % 2 === 0) {
+                        ctx.fillRect(x, y, checkerSize, checkerSize);
+                    }
+                }
+            }
+            
+            // Optionally, you can still draw the grid lines on top
+            ctx.strokeStyle = '#444444';
+            ctx.lineWidth = 0.5;
+            
+            // Draw grid lines
+            for (let i = 0; i <= TILE_SIZE; i += 16) {
+                // Vertical line
+                ctx.beginPath();
+                ctx.moveTo(i, 0);
+                ctx.lineTo(i, TILE_SIZE);
+                ctx.stroke();
+                
+                // Horizontal line
+                ctx.beginPath();
+                ctx.moveTo(0, i);
+                ctx.lineTo(TILE_SIZE, i);
+                ctx.stroke();
+            }
+        }
+        
+        function renderTile(tileKey, pixels, isPartialUpdate = true) {
+            const tile = tileElements[tileKey];
+            if (!tile) return;
+            
+            const [tileX, tileY] = tileKey.split(',').map(Number);
+            const ctx = tile.getContext('2d');
+            
+            // If this is a full tile update (not incremental), clear the tile and draw checker pattern first
+            if (!isPartialUpdate) {
+                // First clear the tile
+                ctx.clearRect(0, 0, TILE_SIZE, TILE_SIZE);
+                
+                // Draw checker pattern for the entire tile
+                for (let y = 0; y < TILE_SIZE; y++) {
+                    for (let x = 0; x < TILE_SIZE; x++) {
+                        // Calculate global coordinates for correct checker pattern alignment
+                        const globalX = tileX * TILE_SIZE + x;
+                        const globalY = tileY * TILE_SIZE + y;
+                        
+                        // Determine checker color based on position
+                        if ((globalX + globalY) % 2 === 0) {
+                            ctx.fillStyle = '#444444'; // Darker gray
+                        } else {
+                            ctx.fillStyle = '#666666'; // Lighter gray
+                        }
+                        ctx.fillRect(x, y, 1, 1);
+                    }
+                }
+            }
+            
+            // Draw each pixel from the data
+            if (pixels && pixels.length) {
+                // Create a map of existing pixels for faster lookup
+                const pixelMap = {};
+                for (const pixel of pixels) {
+                    const localX = pixel.x - (tileX * TILE_SIZE);
+                    const localY = pixel.y - (tileY * TILE_SIZE);
+                    
+                    if (localX >= 0 && localX < TILE_SIZE && localY >= 0 && localY < TILE_SIZE) {
+                        // Skip null/invalid pixels
+                        if (pixel.r === null || pixel.g === null || pixel.b === null) {
+                            continue;
+                        }
+                        
+                        ctx.fillStyle = `rgb(${pixel.r}, ${pixel.g}, ${pixel.b})`;
+                        ctx.fillRect(localX, localY, 1, 1);
+                        
+                        // Mark this position as filled
+                        pixelMap[`${localX},${localY}`] = true;
+                    }
+                }
+                
+                // If this is a partial update and we're not preserving the checker pattern,
+                // then we don't need to do anything more
+                if (isPartialUpdate) {
+                    return;
+                }
+            }
+        }
+        
+        function startUpdateCycle() {
+            // Initial update
+            fetchUpdates();
+            
+            // Poll for updates more frequently (every 1 second instead of 2)
+            setInterval(fetchUpdates, 1000);
+            
+            // Refresh active tiles less frequently to avoid overwhelming the server
+            setInterval(refreshActiveTiles, 15000);
+        }
+        
+        async function fetchUpdates() {
+            try {
+                // Add timestamp to prevent caching
+                const timestamp = Date.now();
+                
+                // Collect checksums of visible tiles to include in the request
+                const visibleChecksums = {};
+                for (const tileKey of visibleTiles) {
+                    if (tileChecksums[tileKey]) {
+                        visibleChecksums[tileKey] = tileChecksums[tileKey];
+                    }
+                }
+                
+                // Build request with checksums and timestamp
+                const params = new URLSearchParams({
+                    since: lastUpdateTimestamp,
+                    t: timestamp
+                });
+                
+                // Send request with checksums in the body
+                const response = await fetch(`get_state.php?${params.toString()}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        checksums: visibleChecksums
+                    })
+                });
+                
+                if (!response.ok) {
+                    // Don't spam the console for repeat errors
+                    if (!window.lastFetchErrorTimestamp || 
+                        Date.now() - window.lastFetchErrorTimestamp > 10000) {
+                        console.error(`Server responded with status: ${response.status}`);
+                        window.lastFetchErrorTimestamp = Date.now();
+                    }
+                    return;
+                }
+                
+                // Clear the error timestamp if successful
+                window.lastFetchErrorTimestamp = null;
+                
+                const text = await response.text();
+                
+                // Handle empty response
+                if (!text.trim()) return;
+                
+                // Parse response (handle PHP warnings)
+                let data;
+                try {
+                    let cleanText = text;
+                    
+                    // If there are PHP warnings, extract just the JSON part
+                    if (text.includes('<br />') && text.includes('{"success"')) {
+                        cleanText = text.substring(text.indexOf('{"success"'));
+                    }
+                    
+                    data = JSON.parse(cleanText);
+                    
+                    if (data.success) {
+                        // Handle changed tiles first - these are tiles whose checksums don't match
+                        if (data.changedTiles && Object.keys(data.changedTiles).length > 0) {
+                            for (const [tileKey, tileData] of Object.entries(data.changedTiles)) {
+                                if (loadedTiles.has(tileKey)) {
+                                    // Update the tile with the complete data
+                                    renderTile(tileKey, tileData.pixels || [], false);
+                                    
+                                    // Update the checksum
+                                    tileChecksums[tileKey] = tileData.checksum;
+                                    
+                                    // Highlight the tile to show it's been updated
+                                    highlightTileUpdate(tileKey);
+                                }
+                            }
+                        }
+                        
+                        // Then handle individual pixel updates for tiles that haven't changed much
+                        if (data.pixels && data.pixels.length > 0) {
+                            // Group pixels by tile
+                            const tileUpdates = {};
+                            const affectedTiles = new Set();
+                            
+                            for (const pixel of data.pixels) {
+                                const tileX = Math.floor(pixel.x / TILE_SIZE);
+                                const tileY = Math.floor(pixel.y / TILE_SIZE);
+                                const tileKey = `${tileX},${tileY}`;
+                                
+                                affectedTiles.add(tileKey);
+                                
+                                if (!tileUpdates[tileKey]) {
+                                    tileUpdates[tileKey] = [];
+                                }
+                                
+                                tileUpdates[tileKey].push(pixel);
+                            }
+                            
+                            // Update each affected tile
+                            for (const [tileKey, pixels] of Object.entries(tileUpdates)) {
+                                if (loadedTiles.has(tileKey) && !data.changedTiles?.[tileKey]) {
+                                    // Update if tile is already loaded and wasn't already updated through changedTiles
+                                    renderTile(tileKey, pixels, true);
+                                    
+                                    // Update checksum if provided
+                                    if (data.tileChecksums && data.tileChecksums[tileKey]) {
+                                        tileChecksums[tileKey] = data.tileChecksums[tileKey];
+                                    }
+                                    
+                                    // Show a subtle indication that a tile updated from another user
+                                    highlightTileUpdate(tileKey);
+                                }
+                            }
+                        }
+                        
+                        // Update timestamp
+                        if (data.timestamp > lastUpdateTimestamp) {
+                            lastUpdateTimestamp = data.timestamp;
+                        }
+                    }
+                } catch (parseError) {
+                    console.error("JSON parse error in updates:", parseError);
+                    console.error("Raw response:", text);
+                }
+            } catch (error) {
+                // Don't spam the console for repeat errors
+                if (!window.lastFetchErrorTimestamp || 
+                    Date.now() - window.lastFetchErrorTimestamp > 10000) {
+                    console.error("Error fetching updates:", error);
+                    window.lastFetchErrorTimestamp = Date.now();
+                }
+            }
+        }
+        
+        // Function to highlight a tile that was updated by another user
+        function highlightTileUpdate(tileKey, type = 'normal') {
+            const tile = tileElements[tileKey];
+            if (!tile) return;
+            
+            // Different highlight colors for different update types
+            let highlightColor;
+            switch (type) {
+                case 'checksum':
+                    // Bright update for checksum changes (major changes)
+                    highlightColor = 'rgba(255,255,255,0.7)';
+                    break;
+                case 'pixel':
+                    // Subtle update for individual pixel changes
+                    highlightColor = 'rgba(255,255,255,0.4)';
+                    break;
+                default:
+                    // Default highlight
+                    highlightColor = 'rgba(255,255,255,0.5)';
+            }
+            
+            // Add a brief highlight effect
+            tile.style.boxShadow = `0 0 8px ${highlightColor}`;
+            
+            // Remove the highlight after a short delay
+            setTimeout(() => {
+                tile.style.boxShadow = 'none';
+            }, 300);
+        }
+        
+        // Force a reload of a specific tile
+        async function reloadTile(tileKey) {
+            if (!tileKey) return;
+            
+            // Remove from loaded tiles so it will be fetched fresh
+            loadedTiles.delete(tileKey);
+            
+            // Now load the tile again with force reload
+            await loadTile(tileKey, true);
+        }
+        
+        // Periodically refresh the most centrally visible tiles
+        // This ensures that even if incremental updates are missed, 
+        // the view will eventually be consistent
+        function refreshActiveTiles() {
+            // Only refresh if we're not currently dragging or moving
+            if (isDragging || movementAnimationFrame) return;
+            
+            // Get the center of the viewport
+            const rect = canvasContainer.getBoundingClientRect();
+            const centerX = (rect.width / 2 - offsetX) / scale;
+            const centerY = (rect.height / 2 - offsetY) / scale;
+            
+            // Calculate the central tile
+            const centerTileX = Math.floor(centerX / TILE_SIZE);
+            const centerTileY = Math.floor(centerY / TILE_SIZE);
+            
+            // Only refresh the center tile and immediate vicinity - just 5 tiles total
+            // This is less intrusive than refreshing a larger area
+            const tilesToCheck = [
+                `${centerTileX},${centerTileY}`,           // Center
+                `${centerTileX-1},${centerTileY}`,         // Left
+                `${centerTileX+1},${centerTileY}`,         // Right
+                `${centerTileX},${centerTileY-1}`,         // Top
+                `${centerTileX},${centerTileY+1}`          // Bottom
+            ];
+            
+            // Create a batch request to check multiple tile checksums at once
+            verifyTileChecksums(tilesToCheck);
+        }
+        
+        // New function to verify tile checksums in batch
+        async function verifyTileChecksums(tileKeys) {
+            // Only check loaded tiles
+            const tilesToVerify = tileKeys.filter(tileKey => {
+                const [tileX, tileY] = tileKey.split(',').map(Number);
+                return tileX >= 0 && tileX < TILE_COUNT && 
+                       tileY >= 0 && tileY < TILE_COUNT && 
+                       loadedTiles.has(tileKey);
+            });
+            
+            if (tilesToVerify.length === 0) return;
+            
+            try {
+                // Prepare checksum data
+                const checksumData = {};
+                tilesToVerify.forEach(tileKey => {
+                    if (tileChecksums[tileKey]) {
+                        checksumData[tileKey] = tileChecksums[tileKey];
+                    }
+                });
+                
+                // If we don't have any checksums to verify, skip
+                if (Object.keys(checksumData).length === 0) return;
+                
+                // Make a batch request to verify multiple checksums at once
+                const response = await fetch('get_state.php?verify_checksums=1', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        checksums: checksumData
+                    })
+                });
+                
+                if (!response.ok) return;
+                
+                const data = await response.json();
+                
+                if (data.success && data.outdatedTiles) {
+                    // Process tiles that need updates
+                    const refreshQueue = Object.keys(data.outdatedTiles);
+                    
+                    if (refreshQueue.length > 0) {
+                        console.log(`Found ${refreshQueue.length} outdated tiles to refresh`);
+                        processRefreshQueue(refreshQueue);
+                    }
+                }
+            } catch (error) {
+                console.error("Error verifying tile checksums:", error);
+            }
+        }
+        
+        // Process refresh queue sequentially with improved error handling
+        async function processRefreshQueue(queue) {
+            if (queue.length === 0) return;
+            
+            const tileKey = queue.shift();
+            
+            try {
+                // Remove from loaded tiles so it will be fetched fresh
+                loadedTiles.delete(tileKey);
+                
+                // Now load the tile again with force reload
+                await loadTile(tileKey, true);
+                
+                // Short delay between tile refreshes
+                if (queue.length > 0) {
+                    setTimeout(() => {
+                        processRefreshQueue(queue);
+                    }, 100);
+                }
+            } catch (error) {
+                console.error(`Error refreshing tile ${tileKey}:`, error);
+                
+                // Continue with next tile even if there was an error
+                if (queue.length > 0) {
+                    setTimeout(() => {
+                        processRefreshQueue(queue);
+                    }, 100);
+                }
+            }
+        }
+        
+        // Add new function for continuous drawing
+        function handleCanvasMouseMove(e) {
+            updateCursorPosition(e.clientX, e.clientY);
+            
+            if (!consecutivePlacementMode || !e.buttons) return;
+            
+            // Get current position
+            const rect = canvasContainer.getBoundingClientRect();
+            const canvasX = Math.floor((e.clientX - rect.left - offsetX) / scale);
+            const canvasY = Math.floor((e.clientY - rect.top - offsetY) / scale);
+            
+            // Ensure coordinates are within board bounds
+            if (canvasX >= 0 && canvasX < BOARD_SIZE && canvasY >= 0 && canvasY < BOARD_SIZE) {
+                // Use a throttled version to avoid overwhelming the server
+                const now = Date.now();
+                if (!window.lastPixelPlacement || now - window.lastPixelPlacement > 50) { // 50ms throttle
+                    window.lastPixelPlacement = now;
+                    placePixel(canvasX, canvasY, true); // true = batch mode
+                }
+            }
+        }
+        
+        // Replace the placePixel function with this improved version (around line 729)
+        async function placePixel(x, y, batchMode = false) {
+            try {
+                // Skip if out of bounds
+                if (x < 0 || x >= BOARD_SIZE || y < 0 || y >= BOARD_SIZE) return;
+                
+                // Parse the selected color to RGB components
+                const r = parseInt(selectedColor.substring(1, 3), 16);
+                const g = parseInt(selectedColor.substring(3, 5), 16);
+                const b = parseInt(selectedColor.substring(5, 7), 16);
+                
+                // Calculate tile coordinates 
+                const tileX = Math.floor(x / TILE_SIZE);
+                const tileY = Math.floor(y / TILE_SIZE);
+                const tileKey = `${tileX},${tileY}`;
+                
+                // If we've failed too many times on this tile in batch mode, skip
+                if (batchMode && tileLocalChanges[tileKey] && tileLocalChanges[tileKey].failures > 3) {
+                    return;
+                }
+                
+                // Update pixel locally first for immediate feedback
+                updateLocalPixel(x, y, r, g, b);
+                
+                // Keep track of local changes for this tile
+                if (!tileLocalChanges[tileKey]) {
+                    tileLocalChanges[tileKey] = {
+                        pixels: [],
+                        lastChecksum: tileChecksums[tileKey] || null,
+                        failures: 0
+                    };
+                }
+                
+                // Add this pixel to local changes
+                tileLocalChanges[tileKey].pixels.push({x, y, r, g, b});
+                
+                // In batch mode, we collect pixels and send them less frequently
+                if (batchMode) {
+                    // If we already have a batch in progress, just exit - the pixel is already drawn locally
+                    if (batchPlacementInProgress) return;
+                    
+                    // If this is a new tile in continuous drawing, we should send right away
+                    const needsImmediateSend = lastPlacedTile !== tileKey;
+                    lastPlacedTile = tileKey;
+                    
+                    // If we don't need to send right away, wait a bit to collect more pixels
+                    if (!needsImmediateSend) {
+                        // Check if we have a pending timeout
+                        if (window.batchPlacementTimeout) {
+                            return;  // Already have a pending batch, just wait
+                        }
+                        
+                        // Set a timeout to send these pixels soon
+                        window.batchPlacementTimeout = setTimeout(() => {
+                            window.batchPlacementTimeout = null;
+                            sendPixelToServer(x, y, r, g, b, tileKey, true);
+                        }, 300); // Send batch after 300ms
+                        
+                        return;
+                    }
+                }
+                
+                // Show a temporary notification
+                let placingNotification;
+                if (!batchMode) {
+                    placingNotification = showNotification(`Placing pixel at (${x}, ${y})...`, 'info', 0);
+                }
+                
+                await sendPixelToServer(x, y, r, g, b, tileKey, batchMode, placingNotification);
+                
+            } catch (error) {
+                console.error("Error placing pixel:", error);
+                if (!batchMode) {
+                    showNotification(`Error: ${error.message}`, 'error');
+                }
+            }
+        }
+        
+        // New helper function to handle the server communication part of pixel placement
+        async function sendPixelToServer(x, y, r, g, b, tileKey, batchMode = false, placingNotification = null) {
+            try {
+                batchPlacementInProgress = true;
+                showLoading(true);
+                
+                // Send pixel data to server with current checksum
+                const pixelData = { 
+                    x, y, r, g, b
+                };
+                
+                // Add the current checksum if we have it
+                if (tileChecksums[tileKey]) {
+                    pixelData.checksum = tileChecksums[tileKey];
+                }
+                
+                // Retry logic for server errors
+                let retryCount = 0;
+                const maxRetries = batchMode ? 1 : 2; // Fewer retries in batch mode
+                
+                while (retryCount <= maxRetries) {
+                    try {
+                        const response = await fetch('set_pixel.php', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(pixelData)
+                        });
+                        
+                        if (!response.ok) {
+                            if (response.status === 500 && retryCount < maxRetries) {
+                                // Server error - retry
+                                retryCount++;
+                                await new Promise(resolve => setTimeout(resolve, 500 * retryCount));
+                                continue;
+                            }
+                            
+                            // Remove the placing notification
+                            if (placingNotification) placingNotification.remove();
+                            
+                            // In batch mode, just count the failure and move on
+                            if (batchMode) {
+                                if (tileLocalChanges[tileKey]) {
+                                    tileLocalChanges[tileKey].failures++;
+                                }
+                                break;
+                            }
+                            
+                            showNotification(`Error (${response.status}): Failed to place pixel`, 'error');
+                            break;
+                        }
+                        
+                        const text = await response.text();
+                        
+                        // Parse response (handle PHP warnings)
+                        try {
+                            let cleanText = text;
+                            
+                            // If there are PHP warnings, extract just the JSON part
+                            if (text.includes('<br />') && text.includes('{"success"')) {
+                                cleanText = text.substring(text.indexOf('{"success"'));
+                            }
+                            
+                            const data = JSON.parse(cleanText);
+                            
+                            // Remove the placing notification
+                            if (placingNotification) placingNotification.remove();
+                            
+                            if (data.success) {
+                                // Clear our local changes tracking for this successful update
+                                if (tileLocalChanges[tileKey]) {
+                                    tileLocalChanges[tileKey].pixels = [];
+                                    tileLocalChanges[tileKey].failures = 0;
+                                    tileLocalChanges[tileKey].lastChecksum = data.checksum;
+                                }
+                                
+                                // Show success notification only in non-batch mode
+                                if (!batchMode) {
+                                    showNotification(`Pixel placed at (${x}, ${y})`, 'success', 1500);
+                                }
+                                
+                                // Update tile checksum if provided
+                                if (data.checksum) {
+                                    tileChecksums[tileKey] = data.checksum;
+                                }
+                                
+                                // Update stats if provided
+                                if (data.stats) {
+                                    stats.innerHTML = `
+                                        <div>Your pixels: ${data.stats.user_pixels || 0}</div>
+                                        <div>Total pixels: ${data.stats.total_pixels || 0}</div>
+                                        <div>Your share: ${data.stats.percentage || 0}%</div>
+                                    `;
+                                    // Make stats visible now that we have data
+                                    stats.style.visibility = 'visible';
+                                }
+                                
+                                // Get the server's timestamp for this update
+                                if (data.timestamp) {
+                                    lastUpdateTimestamp = data.timestamp;
+                                }
+                                
+                                break;
+                            } else {
+                                // If checksum mismatch was reported, update our local checksum
+                                if (data.error === "checksum_mismatch" && data.checksum) {
+                                    tileChecksums[tileKey] = data.checksum;
+                                    
+                                    // In batch mode, just track the failure and continue
+                                    if (batchMode) {
+                                        if (tileLocalChanges[tileKey]) {
+                                            tileLocalChanges[tileKey].failures++;
+                                        }
+                                        
+                                        // If we've failed too many times, reload the tile and show a message
+                                        if (tileLocalChanges[tileKey] && tileLocalChanges[tileKey].failures > 3) {
+                                            showNotification(`Reloading tile due to conflicts...`, 'warning', 1500);
+                                            reloadTile(tileKey);
+                                        }
+                                    } else {
+                                        // In non-batch mode, show checksum mismatch notification and reload
+                                        showNotification(`Tile was modified by another user. Trying to apply your change...`, 'warning', 1500);
+                                        
+                                        // Try again with the new checksum
+                                        pixelData.checksum = data.checksum;
+                                        
+                                        // Make one more attempt with the updated checksum
+                                        try {
+                                            const retryResponse = await fetch('set_pixel.php', {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify(pixelData)
+                                            });
+                                            
+                                            const retryData = await retryResponse.json();
+                                            
+                                            if (retryData.success) {
+                                                showNotification(`Pixel placed successfully after retry`, 'success', 1500);
+                                                
+                                                // Update checksum if provided
+                                                if (retryData.checksum) {
+                                                    tileChecksums[tileKey] = retryData.checksum;
+                                                }
+                                                
+                                                break;
+                                            }
+                                        } catch (retryErr) {
+                                            console.error("Error during retry:", retryErr);
+                                        }
+                                        
+                                        // If we get here, even the retry failed
+                                        reloadTile(tileKey);
+                                    }
+                                } else {
+                                    // Other error
+                                    if (!batchMode) {
+                                        showNotification(`Error: ${data.error || 'Unknown error'}`, 'error');
+                                    }
+                                }
+                                break;
+                            }
+                        } catch (parseError) {
+                            console.error("JSON parse error:", parseError);
+                            console.log("Raw response:", text);
+                            
+                            if (batchMode) {
+                                if (tileLocalChanges[tileKey]) {
+                                    tileLocalChanges[tileKey].failures++;
+                                }
+                                break;
+                            }
+                            
+                            // Even if we can't parse the response, the pixel was likely placed 
+                            // successfully if we got a 200 OK response
+                            if (placingNotification) placingNotification.remove();
+                            showNotification(`Pixel placed at (${x}, ${y})`, 'success', 1500);
+                            break;
+                        }
+                    } catch (serverError) {
+                        console.error("Server error:", serverError);
+                        
+                        if (retryCount < maxRetries) {
+                            retryCount++;
+                            await new Promise(resolve => setTimeout(resolve, 500 * retryCount));
+                            continue;
+                        }
+                        
+                        // In batch mode, just count the failure
+                        if (batchMode) {
+                            if (tileLocalChanges[tileKey]) {
+                                tileLocalChanges[tileKey].failures++;
+                            }
+                            break;
+                        }
+                        
+                        // Remove the placing notification
+                        if (placingNotification) placingNotification.remove();
+                        
+                        showNotification(`Server error: ${serverError.message}`, 'error');
+                        break;
+                    }
+                }
+            } finally {
+                batchPlacementInProgress = false;
+                showLoading(false);
+            }
+        }
+        
+        function updateLocalPixel(x, y, r, g, b) {
+            // Calculate which tile this pixel belongs to
+            const tileX = Math.floor(x / TILE_SIZE);
+            const tileY = Math.floor(y / TILE_SIZE);
+            const tileKey = `${tileX},${tileY}`;
+            
+            // Record the timestamp of this update
+            tileUpdateTimestamps[tileKey] = Date.now();
+            
+            // Create tile if it doesn't exist
+            if (!tileElements[tileKey]) {
+                const tile = document.createElement('canvas');
+                tile.width = TILE_SIZE;
+                tile.height = TILE_SIZE;
+                tile.className = 'tile';
+                tile.style.left = `${tileX * TILE_SIZE}px`;
+                tile.style.top = `${tileY * TILE_SIZE}px`;
+                
+                pixelCanvas.appendChild(tile);
+                tileElements[tileKey] = tile;
+                loadedTiles.add(tileKey);
+            }
+            
+            // Update the pixel on the tile
+            const tile = tileElements[tileKey];
+            const ctx = tile.getContext('2d');
+            
+            // Calculate local coordinates
+            const localX = x - (tileX * TILE_SIZE);
+            const localY = y - (tileY * TILE_SIZE);
+            
+            ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+            ctx.fillRect(localX, localY, 1, 1);
+        }
+        
+        function showLoading(visible) {
+            loading.classList.toggle('visible', visible);
+        }
+        
+        function showNotification(message, type = 'info', duration = 3000) {
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.textContent = message;
+            
+            document.body.appendChild(notification);
+            
+            // Remove after duration
+            if (duration > 0) {
+                setTimeout(() => {
+                    notification.classList.add('fade-out');
+                    setTimeout(() => notification.remove(), 500);
+                }, duration);
+            }
+            
+            return notification;
+        }
+        
+        // Function to update the current color display
+        function updateColorDisplay(colorHex) {
+            const currentColorPreview = document.getElementById('currentColorPreview');
+            const currentColorText = document.getElementById('currentColorText');
+            
+            currentColorPreview.style.backgroundColor = colorHex;
+            currentColorText.textContent = colorHex.toUpperCase();
+            
+            // Also update the custom color input to match
+            const customColorInput = document.getElementById('customColorInput');
+            customColorInput.value = colorHex;
+        }
+    </script>
+</body>
+</html> 
