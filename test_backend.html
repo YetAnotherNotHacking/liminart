@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Backend Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #e0e0e0;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #444;
+            border-radius: 8px;
+            background: #2a2a2a;
+        }
+        button {
+            padding: 8px 16px;
+            margin: 5px;
+            background: #4a9eff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #3a8ae6;
+        }
+        .result {
+            margin-top: 10px;
+            padding: 10px;
+            background: #333;
+            border-radius: 4px;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        .success { border-left: 3px solid #44ff44; }
+        .error { border-left: 3px solid #ff4444; }
+    </style>
+</head>
+<body>
+    <h1>Python Backend Test</h1>
+    
+    <div class="test-section">
+        <h3>1. Basic API Connection</h3>
+        <button onclick="testConnection()">Test Connection</button>
+        <div id="connection-result" class="result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>2. Get Canvas State</h3>
+        <button onclick="testState()">Get State</button>
+        <div id="state-result" class="result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>3. User Registration</h3>
+        <button onclick="testRegister()">Test Register</button>
+        <div id="register-result" class="result"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'https://silverflag.net:6969/api';
+        
+        async function testConnection() {
+            const resultDiv = document.getElementById('connection-result');
+            resultDiv.textContent = 'Testing connection...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/state?tile_x=0&tile_y=0`);
+                const data = await response.json();
+                
+                resultDiv.textContent = `✅ Connection successful!\nStatus: ${response.status}\nResponse: ${JSON.stringify(data, null, 2)}`;
+                resultDiv.className = 'result success';
+            } catch (error) {
+                resultDiv.textContent = `❌ Connection failed: ${error.message}`;
+                resultDiv.className = 'result error';
+            }
+        }
+        
+        async function testState() {
+            const resultDiv = document.getElementById('state-result');
+            resultDiv.textContent = 'Testing state endpoint...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/state?tile_x=0&tile_y=0`);
+                const data = await response.json();
+                
+                resultDiv.textContent = `✅ State endpoint working!\nTiles returned: ${data.tiles ? data.tiles.length : 0}\nResponse: ${JSON.stringify(data, null, 2)}`;
+                resultDiv.className = 'result success';
+            } catch (error) {
+                resultDiv.textContent = `❌ State test failed: ${error.message}`;
+                resultDiv.className = 'result error';
+            }
+        }
+        
+        async function testRegister() {
+            const resultDiv = document.getElementById('register-result');
+            resultDiv.textContent = 'Testing registration...';
+            
+            const testUser = {
+                username: `test_${Date.now()}`,
+                email: `test_${Date.now()}@example.com`,
+                password: 'testpassword123',
+                display_name: 'Test User'
+            };
+            
+            try {
+                const response = await fetch(`${API_BASE}/auth/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(testUser)
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    resultDiv.textContent = `✅ Registration successful!\nUser: ${testUser.username}\nResponse: ${JSON.stringify(data, null, 2)}`;
+                    resultDiv.className = 'result success';
+                } else {
+                    resultDiv.textContent = `⚠️ Registration failed (expected for testing)\nStatus: ${response.status}\nResponse: ${JSON.stringify(data, null, 2)}`;
+                    resultDiv.className = 'result error';
+                }
+            } catch (error) {
+                resultDiv.textContent = `❌ Registration test failed: ${error.message}`;
+                resultDiv.className = 'result error';
+            }
+        }
+    </script>
+</body>
+</html> 
