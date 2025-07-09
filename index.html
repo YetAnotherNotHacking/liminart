@@ -48,6 +48,146 @@
             gap: 10px;
         }
 
+        .auth-section {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-left: auto;
+        }
+
+        .auth-btn {
+            padding: 6px 12px;
+            background: rgba(0, 0, 0, 0.6);
+            color: var(--text-color);
+            border: 1px solid #444;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background 0.2s;
+        }
+
+        .auth-btn:hover {
+            background: rgba(0, 0, 0, 0.8);
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 8px;
+            background: rgba(0, 0, 0, 0.6);
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .user-avatar {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: #666;
+            border: 1px solid #888;
+        }
+
+        .auth-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: none;
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .auth-modal.active {
+            display: flex;
+        }
+
+        .auth-modal-content {
+            background: var(--bg-color);
+            border: 1px solid #444;
+            border-radius: 8px;
+            padding: 24px;
+            max-width: 400px;
+            width: 90%;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        }
+
+        .auth-modal h2 {
+            margin: 0 0 20px 0;
+            color: var(--accent-color);
+            text-align: center;
+        }
+
+        .auth-form {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .auth-input {
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid #555;
+            border-radius: 4px;
+            color: var(--text-color);
+            font-size: 14px;
+        }
+
+        .auth-input:focus {
+            outline: none;
+            border-color: var(--accent-color);
+        }
+
+        .auth-submit {
+            padding: 12px;
+            background: var(--accent-color);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+        }
+
+        .auth-submit:hover {
+            background: #3a8ae6;
+        }
+
+        .auth-submit:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+
+        .auth-switch {
+            text-align: center;
+            margin-top: 16px;
+            color: #ccc;
+        }
+
+        .auth-switch a {
+            color: var(--accent-color);
+            cursor: pointer;
+            text-decoration: none;
+        }
+
+        .auth-switch a:hover {
+            text-decoration: underline;
+        }
+
+        .auth-close {
+            position: absolute;
+            top: 8px;
+            right: 12px;
+            background: none;
+            border: none;
+            color: #ccc;
+            cursor: pointer;
+            font-size: 20px;
+        }
+
         .color-palette {
             display: flex;
             gap: 5px;
@@ -320,6 +460,9 @@
             <button id="debugBtn" class="control-btn">🔍</button>
             <button id="resetBtn" class="control-btn">⟲</button>
         </div>
+        <div class="auth-section" id="authSection">
+            <!-- Will be populated by JavaScript -->
+        </div>
     </div>
 
     <div class="canvas-container" id="canvasContainer">
@@ -334,11 +477,43 @@
 
     <div class="loading" id="loading">Loading tiles...</div>
 
+    <!-- Authentication Modals -->
+    <div class="auth-modal" id="authModal">
+        <div class="auth-modal-content">
+            <button class="auth-close" onclick="closeAuthModal()">&times;</button>
+            <div id="loginForm" class="auth-form-container">
+                <h2>Login to Pixel Canvas</h2>
+                <form class="auth-form" onsubmit="handleLogin(event)">
+                    <input type="text" class="auth-input" placeholder="Username" name="username" required>
+                    <input type="password" class="auth-input" placeholder="Password" name="password" required>
+                    <button type="submit" class="auth-submit">Login</button>
+                </form>
+                <div class="auth-switch">
+                    Don't have an account? <a onclick="switchToRegister()">Register</a>
+                </div>
+            </div>
+            <div id="registerForm" class="auth-form-container" style="display: none;">
+                <h2>Create Account</h2>
+                <form class="auth-form" onsubmit="handleRegister(event)">
+                    <input type="text" class="auth-input" placeholder="Username (3-50 chars)" name="username" required minlength="3" maxlength="50">
+                    <input type="email" class="auth-input" placeholder="Email" name="email" required>
+                    <input type="password" class="auth-input" placeholder="Password (min 8 chars)" name="password" required minlength="8">
+                    <input type="text" class="auth-input" placeholder="Display Name (optional)" name="displayName" maxlength="100">
+                    <button type="submit" class="auth-submit">Register</button>
+                </form>
+                <div class="auth-switch">
+                    Already have an account? <a onclick="switchToLogin()">Login</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         // Configuration
-        const TILE_SIZE = 32; // Match the PHP server's tile size
-        const BOARD_SIZE = 1000; // Match the PHP server's canvas size
+        const TILE_SIZE = 128; // Match the Python server's tile size
+        const BOARD_SIZE = 1024; // Match the Python server's canvas size
         const TILE_COUNT = BOARD_SIZE / TILE_SIZE;
+        const API_BASE = 'https://silverflag.net:6969/api';
         
         // State variables
         let scale = 1;
@@ -346,6 +521,10 @@
         let offsetY = 0;
         let selectedColor = '#000000';
         let lastUpdateTimestamp = 0;
+        
+        // Authentication state
+        let currentUser = null;
+        let authToken = localStorage.getItem('token');
         let isDragging = false;
         let dragStartX = 0;
         let dragStartY = 0;
@@ -392,16 +571,216 @@
         // Initialize the application
         init();
         
+        // Check for email verification token in URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const verifyToken = urlParams.get('verify');
+        if (verifyToken) {
+            verifyEmail(verifyToken);
+        }
+        
+        async function verifyEmail(token) {
+            try {
+                const response = await fetch(`${API_BASE}/auth/verify-email`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showNotification('Email verified successfully! You can now login.', 'success', 5000);
+                    // Remove the token from URL
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                } else {
+                    showNotification(data.detail || 'Email verification failed', 'error');
+                }
+            } catch (error) {
+                showNotification('Email verification failed: ' + error.message, 'error');
+            }
+        }
+        
+        // Authentication Functions
+        function getAuthHeaders() {
+            const headers = { 'Content-Type': 'application/json' };
+            if (authToken) {
+                headers['Authorization'] = `Bearer ${authToken}`;
+            }
+            return headers;
+        }
+        
+        async function initAuth() {
+            if (authToken) {
+                try {
+                    const response = await fetch(`${API_BASE}/auth/me`, {
+                        headers: getAuthHeaders()
+                    });
+                    
+                    if (response.ok) {
+                        currentUser = await response.json();
+                        updateAuthUI();
+                    } else {
+                        // Token is invalid, clear it
+                        localStorage.removeItem('token');
+                        authToken = null;
+                        updateAuthUI();
+                    }
+                } catch (error) {
+                    console.error('Auth check failed:', error);
+                    updateAuthUI();
+                }
+            } else {
+                updateAuthUI();
+            }
+        }
+        
+        function updateAuthUI() {
+            const authSection = document.getElementById('authSection');
+            
+            if (currentUser) {
+                authSection.innerHTML = `
+                    <div class="user-info">
+                        <img class="user-avatar" src="${API_BASE}/user/profile-picture/${currentUser.id}" 
+                             onerror="this.style.display='none'" alt="Avatar">
+                        <span>${currentUser.display_name || currentUser.username}</span>
+                        <button class="auth-btn" onclick="logout()">Logout</button>
+                    </div>
+                `;
+            } else {
+                authSection.innerHTML = `
+                    <button class="auth-btn" onclick="showLogin()">Login</button>
+                    <button class="auth-btn" onclick="showRegister()">Register</button>
+                `;
+            }
+        }
+        
+        function showLogin() {
+            document.getElementById('authModal').classList.add('active');
+            document.getElementById('loginForm').style.display = 'block';
+            document.getElementById('registerForm').style.display = 'none';
+        }
+        
+        function showRegister() {
+            document.getElementById('authModal').classList.add('active');
+            document.getElementById('loginForm').style.display = 'none';
+            document.getElementById('registerForm').style.display = 'block';
+        }
+        
+        function switchToLogin() {
+            document.getElementById('loginForm').style.display = 'block';
+            document.getElementById('registerForm').style.display = 'none';
+        }
+        
+        function switchToRegister() {
+            document.getElementById('loginForm').style.display = 'none';
+            document.getElementById('registerForm').style.display = 'block';
+        }
+        
+        function closeAuthModal() {
+            document.getElementById('authModal').classList.remove('active');
+        }
+        
+        async function handleLogin(event) {
+            event.preventDefault();
+            const form = event.target;
+            const submitBtn = form.querySelector('.auth-submit');
+            
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Logging in...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: form.username.value,
+                        password: form.password.value
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    authToken = data.access_token;
+                    localStorage.setItem('token', authToken);
+                    
+                    // Get user info
+                    const userResponse = await fetch(`${API_BASE}/auth/me`, {
+                        headers: getAuthHeaders()
+                    });
+                    
+                    if (userResponse.ok) {
+                        currentUser = await userResponse.json();
+                        closeAuthModal();
+                        updateAuthUI();
+                        showNotification('Login successful!', 'success');
+                        form.reset();
+                    }
+                } else {
+                    showNotification(data.detail || 'Login failed', 'error');
+                }
+            } catch (error) {
+                showNotification('Login failed: ' + error.message, 'error');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Login';
+            }
+        }
+        
+        async function handleRegister(event) {
+            event.preventDefault();
+            const form = event.target;
+            const submitBtn = form.querySelector('.auth-submit');
+            
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Registering...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/auth/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: form.username.value,
+                        email: form.email.value,
+                        password: form.password.value,
+                        display_name: form.displayName.value || null
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showNotification('Registration successful! Please check your email to verify your account.', 'success', 5000);
+                    closeAuthModal();
+                    form.reset();
+                } else {
+                    showNotification(data.detail || 'Registration failed', 'error');
+                }
+            } catch (error) {
+                showNotification('Registration failed: ' + error.message, 'error');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Register';
+            }
+        }
+        
+        function logout() {
+            localStorage.removeItem('token');
+            authToken = null;
+            currentUser = null;
+            updateAuthUI();
+            showNotification('Logged out successfully', 'success');
+        }
+        
         function init() {
-            // Setup initial canvas state
-            updateCanvasTransform();
-
+            // Initialize authentication first
+            initAuth();
+            
             // Setup initial canvas state
             updateCanvasTransform();
             
             // Add checker pattern style
             addCheckerPatternStyle();
-    
             
             // Setup color palette (use existing HTML buttons now)
             initColorPalette();
@@ -495,18 +874,7 @@
         }
         
         function setupEventListeners() {
-            // Add a setup button
-            const setupBtn = document.createElement('button');
-            setupBtn.id = 'setupBtn';
-            setupBtn.className = 'control-btn';
-            setupBtn.textContent = '🔧';
-            setupBtn.title = 'Database Setup';
-            setupBtn.style.marginLeft = '5px';
-            document.querySelector('.toolbar-section:last-child').appendChild(setupBtn);
-            
-            setupBtn.addEventListener('click', () => {
-                window.open('db_setup.php', '_blank');
-            });
+            // No setup button needed for Python backend
             
             // Canvas interaction events
             canvasContainer.addEventListener('mousedown', handleMouseDown);
@@ -544,9 +912,13 @@
             // Reset button
             resetBtn.addEventListener('click', centerCanvas);
             
-            // Debug button
+            // Debug button - could open a stats page later
             debugBtn.addEventListener('click', () => {
-                window.open('monitor.php', '_blank');
+                if (currentUser) {
+                    showNotification('User stats feature coming soon!', 'info');
+                } else {
+                    showNotification('Login to see stats', 'warning');
+                }
             });
             
             // Keyboard controls (WASD)
@@ -856,44 +1228,20 @@
             showLoading(true);
             
             try {
-                const response = await fetch('get_state.php?info=1');
+                // Get basic canvas info - use state endpoint to get dimensions
+                const response = await fetch(`${API_BASE}/state?tile_x=0&tile_y=0`, {
+                    headers: getAuthHeaders()
+                });
                 
                 if (!response.ok) {
                     throw new Error(`Server responded with status: ${response.status}`);
                 }
                 
-                const text = await response.text();
+                const data = await response.json();
                 
-                // Handle empty response
-                if (!text.trim()) {
-                    console.warn("Empty response from server");
-                    return;
-                }
+                console.log("Board info loaded", data);
+                lastUpdateTimestamp = Date.now();
                 
-                // Handle PHP warnings mixed with JSON
-                let data;
-                try {
-                    let cleanText = text;
-                    
-                    // If there are PHP warnings, extract just the JSON part
-                    if (text.includes('<br />') && text.includes('{"success"')) {
-                        cleanText = text.substring(text.indexOf('{"success"'));
-                        console.warn("Cleaned PHP warnings from response");
-                    }
-                    
-                    data = JSON.parse(cleanText);
-                    
-                    if (data.success) {
-                        lastUpdateTimestamp = data.timestamp || 0;
-                        console.log("Board info loaded", data);
-                    } else {
-                        console.warn("Server returned success=false", data);
-                    }
-                } catch (parseError) {
-                    console.error("JSON parse error:", parseError);
-                    console.error("Raw response:", text);
-                    throw new Error("Failed to parse server response");
-                }
             } catch (error) {
                 console.error("Error fetching board info:", error);
                 throw error;
@@ -970,7 +1318,9 @@
                     
                     // Add timestamp to prevent caching issues
                     const timestamp = Date.now();
-                    const response = await fetch(`get_state.php?tile_x=${tileX}&tile_y=${tileY}&t=${timestamp}`);
+                    const response = await fetch(`${API_BASE}/state?tile_x=${tileX}&tile_y=${tileY}&t=${timestamp}`, {
+                        headers: getAuthHeaders()
+                    });
                     
                     if (!response.ok) {
                         if (response.status === 500 && retryCount < maxRetries) {
@@ -990,63 +1340,48 @@
                         return;
                     }
                     
-                    const text = await response.text();
+                    const data = await response.json();
                     
-                    // Handle empty response
-                    if (!text.trim()) {
-                        renderEmptyTile(tileKey);
-                        return;
-                    }
+                    // Check if there was a more recent local update to this tile
+                    // If so, don't overwrite it with the server data
+                    const lastLocalUpdate = tileUpdateTimestamps[tileKey] || 0;
+                    const shouldRender = forceReload || !lastLocalUpdate || lastLocalUpdate < requestTimestamp;
                     
-                    // Handle PHP warnings mixed with JSON
-                    try {
-                        let cleanText = text;
+                    // Handle new Python API format
+                    if (data.tiles && data.tiles.length > 0) {
+                        const tileData = data.tiles[0];
                         
-                        // If there are PHP warnings, extract just the JSON part
-                        if (text.includes('<br />') && text.includes('{"success"')) {
-                            cleanText = text.substring(text.indexOf('{"success"'));
-                        }
-                        
-                        const data = JSON.parse(cleanText);
-                        
-                        // Check if there was a more recent local update to this tile
-                        // If so, don't overwrite it with the server data
-                        const lastLocalUpdate = tileUpdateTimestamps[tileKey] || 0;
-                        const shouldRender = forceReload || !lastLocalUpdate || lastLocalUpdate < requestTimestamp;
-                        
-                        if (data.success && shouldRender) {
-                            renderTile(tileKey, data.pixels || [], false);
+                        if (shouldRender) {
+                            // Decode base64 tile data
+                            const decodedData = atob(tileData.data);
+                            const pixels = [];
                             
-                            // Store the checksum if available
-                            if (data.checksum) {
-                                tileChecksums[tileKey] = data.checksum;
+                            if (decodedData.trim()) {
+                                const pixelStrings = decodedData.split('|');
+                                for (const pixelStr of pixelStrings) {
+                                    if (pixelStr.trim()) {
+                                        const [x, y, r, g, b] = pixelStr.split(',').map(Number);
+                                        pixels.push({ x, y, r, g, b });
+                                    }
+                                }
                             }
                             
-                            if (data.timestamp > lastUpdateTimestamp) {
-                                lastUpdateTimestamp = data.timestamp;
+                            renderTile(tileKey, pixels, false);
+                            
+                            // Store the checksum if available
+                            if (tileData.checksum) {
+                                tileChecksums[tileKey] = tileData.checksum;
                             }
                             
                             // Successfully loaded the tile
-                            break;
-                        } else if (!data.success) {
-                            renderEmptyTile(tileKey);
-                            if (data.error) {
-                                console.warn(`Server returned error for tile ${tileKey}: ${data.error}`);
-                            }
                             break;
                         } else {
                             // We had a more recent local update, don't overwrite
                             console.log(`Skipping update for tile ${tileKey} due to more recent local change`);
                             break;
                         }
-                    } catch (parseError) {
-                        console.error(`Error parsing tile ${tileKey}:`, parseError);
-                        console.error("Raw response:", text);
-                        if (retryCount < maxRetries) {
-                            retryCount++;
-                            await new Promise(resolve => setTimeout(resolve, 500 * retryCount));
-                            continue;
-                        }
+                    } else {
+                        // Empty tile
                         renderEmptyTile(tileKey);
                         break;
                     }
@@ -1200,11 +1535,9 @@
                 });
                 
                 // Send request with checksums in the body
-                const response = await fetch(`get_state.php?${params.toString()}`, {
+                const response = await fetch(`${API_BASE}/updates?${params.toString()}`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers: getAuthHeaders(),
                     body: JSON.stringify({
                         checksums: visibleChecksums
                     })
@@ -1590,9 +1923,9 @@
                 
                 while (retryCount <= maxRetries) {
                     try {
-                        const response = await fetch('set_pixel.php', {
+                        const response = await fetch(`${API_BASE}/pixel`, {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: getAuthHeaders(),
                             body: JSON.stringify(pixelData)
                         });
                         
@@ -1619,130 +1952,46 @@
                             break;
                         }
                         
-                        const text = await response.text();
+                        const data = await response.json();
                         
-                        // Parse response (handle PHP warnings)
-                        try {
-                            let cleanText = text;
-                            
-                            // If there are PHP warnings, extract just the JSON part
-                            if (text.includes('<br />') && text.includes('{"success"')) {
-                                cleanText = text.substring(text.indexOf('{"success"'));
+                        // Remove the placing notification
+                        if (placingNotification) placingNotification.remove();
+                        
+                        if (data.success) {
+                            // Clear our local changes tracking for this successful update
+                            if (tileLocalChanges[tileKey]) {
+                                tileLocalChanges[tileKey].pixels = [];
+                                tileLocalChanges[tileKey].failures = 0;
+                                tileLocalChanges[tileKey].lastChecksum = data.checksum;
                             }
                             
-                            const data = JSON.parse(cleanText);
-                            
-                            // Remove the placing notification
-                            if (placingNotification) placingNotification.remove();
-                            
-                            if (data.success) {
-                                // Clear our local changes tracking for this successful update
-                                if (tileLocalChanges[tileKey]) {
-                                    tileLocalChanges[tileKey].pixels = [];
-                                    tileLocalChanges[tileKey].failures = 0;
-                                    tileLocalChanges[tileKey].lastChecksum = data.checksum;
-                                }
-                                
-                                // Show success notification only in non-batch mode
-                                if (!batchMode) {
-                                    showNotification(`Pixel placed at (${x}, ${y})`, 'success', 1500);
-                                }
-                                
-                                // Update tile checksum if provided
-                                if (data.checksum) {
-                                    tileChecksums[tileKey] = data.checksum;
-                                }
-                                
-                                // Update stats if provided
-                                if (data.stats) {
-                                    stats.innerHTML = `
-                                        <div>Your pixels: ${data.stats.user_pixels || 0}</div>
-                                        <div>Total pixels: ${data.stats.total_pixels || 0}</div>
-                                        <div>Your share: ${data.stats.percentage || 0}%</div>
-                                    `;
-                                    // Make stats visible now that we have data
-                                    stats.style.visibility = 'visible';
-                                }
-                                
-                                // Get the server's timestamp for this update
-                                if (data.timestamp) {
-                                    lastUpdateTimestamp = data.timestamp;
-                                }
-                                
-                                break;
-                            } else {
-                                // If checksum mismatch was reported, update our local checksum
-                                if (data.error === "checksum_mismatch" && data.checksum) {
-                                    tileChecksums[tileKey] = data.checksum;
-                                    
-                                    // In batch mode, just track the failure and continue
-                                    if (batchMode) {
-                                        if (tileLocalChanges[tileKey]) {
-                                            tileLocalChanges[tileKey].failures++;
-                                        }
-                                        
-                                        // If we've failed too many times, reload the tile and show a message
-                                        if (tileLocalChanges[tileKey] && tileLocalChanges[tileKey].failures > 3) {
-                                            showNotification(`Reloading tile due to conflicts...`, 'warning', 1500);
-                                            reloadTile(tileKey);
-                                        }
-                                    } else {
-                                        // In non-batch mode, show checksum mismatch notification and reload
-                                        showNotification(`Tile was modified by another user. Trying to apply your change...`, 'warning', 1500);
-                                        
-                                        // Try again with the new checksum
-                                        pixelData.checksum = data.checksum;
-                                        
-                                        // Make one more attempt with the updated checksum
-                                        try {
-                                            const retryResponse = await fetch('set_pixel.php', {
-                                                method: 'POST',
-                                                headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify(pixelData)
-                                            });
-                                            
-                                            const retryData = await retryResponse.json();
-                                            
-                                            if (retryData.success) {
-                                                showNotification(`Pixel placed successfully after retry`, 'success', 1500);
-                                                
-                                                // Update checksum if provided
-                                                if (retryData.checksum) {
-                                                    tileChecksums[tileKey] = retryData.checksum;
-                                                }
-                                                
-                                                break;
-                                            }
-                                        } catch (retryErr) {
-                                            console.error("Error during retry:", retryErr);
-                                        }
-                                        
-                                        // If we get here, even the retry failed
-                                        reloadTile(tileKey);
-                                    }
-                                } else {
-                                    // Other error
-                                    if (!batchMode) {
-                                        showNotification(`Error: ${data.error || 'Unknown error'}`, 'error');
-                                    }
-                                }
-                                break;
-                            }
-                        } catch (parseError) {
-                            console.error("JSON parse error:", parseError);
-                            console.log("Raw response:", text);
-                            
-                            if (batchMode) {
-                                if (tileLocalChanges[tileKey]) {
-                                    tileLocalChanges[tileKey].failures++;
-                                }
-                                break;
+                            // Show success notification only in non-batch mode
+                            if (!batchMode) {
+                                showNotification(`Pixel placed at (${x}, ${y})`, 'success', 1500);
                             }
                             
-                            // Even if we can't parse the response, the pixel was likely placed 
-                            // successfully if we got a 200 OK response
-                            if (placingNotification) placingNotification.remove();
-                            showNotification(`Pixel placed at (${x}, ${y})`, 'success', 1500);
+                            // Update tile checksum if provided
+                            if (data.checksum) {
+                                tileChecksums[tileKey] = data.checksum;
+                            }
+                            
+                            // Update stats if provided
+                            if (data.stats) {
+                                stats.innerHTML = `
+                                    <div>Your pixels: ${data.stats.user_pixels || 0}</div>
+                                    <div>Total pixels: ${data.stats.total_pixels || 0}</div>
+                                    <div>Active users: ${data.stats.active_users || 0}</div>
+                                `;
+                                // Make stats visible now that we have data
+                                stats.style.visibility = 'visible';
+                            }
+                            
+                            break;
+                        } else {
+                            // Handle error from new API
+                            if (!batchMode) {
+                                showNotification(`Error: ${data.detail || 'Unknown error'}`, 'error');
+                            }
                             break;
                         }
                     } catch (serverError) {
