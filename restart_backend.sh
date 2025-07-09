@@ -9,7 +9,7 @@ cd backend
 
 # Stop any running containers
 echo "Stopping existing containers..."
-docker-compose down
+sudo docker-compose down
 
 # Run database migration
 echo "Running database migration to fix INET column issues..."
@@ -20,7 +20,7 @@ sleep 2
 
 # Start the backend
 echo "Starting backend services..."
-docker-compose up -d
+sudo docker-compose up -d
 
 # Wait for services to start
 echo "Waiting for services to start..."
@@ -28,11 +28,11 @@ sleep 10
 
 # Check if services are running
 echo "Checking service status..."
-docker-compose ps
+sudo docker-compose ps
 
 # Check logs
 echo "Recent logs:"
-docker-compose logs --tail=20
+sudo docker-compose logs --tail=20
 
 echo
 echo "=== Backend Restart Complete ==="
@@ -40,5 +40,5 @@ echo "Backend should be running at: http://localhost:9696"
 echo "API documentation: http://localhost:9696/docs"
 echo "Health check: http://localhost:9696/health"
 echo
-echo "To view logs: docker-compose logs -f"
-echo "To stop: docker-compose down" X
+echo "To view logs: sudo docker-compose logs -f"
+echo "To stop: sudo docker-compose down"
