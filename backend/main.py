@@ -1,98 +1,155 @@
-from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+import uvicorn
+import time
+import logging
 from contextlib import asynccontextmanager
-import asyncio
+
+from api import router as api_router
 from database import init_db
-from api import router
 from config import settings
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Handle application startup and shutdown"""
     # Startup
-    print("Starting Pixel Canvas API...")
-    await asyncio.sleep(5)  # Wait for PostgreSQL to start
-    await init_db()
-    print("Database tables created successfully")
+    logger.info("Starting Pixel Canvas Backend...")
+    try:
+        await init_db()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+        raise
+    
     yield
+    
     # Shutdown
-    print("Shutting down Pixel Canvas API...")
+    logger.info("Shutting down Pixel Canvas Backend...")
 
+# Create FastAPI app
 app = FastAPI(
     title="Pixel Canvas API",
-    description="Backend API for collaborative pixel canvas",
-    version="1.0.0",
+    description="Backend API for collaborative pixel canvas with user authentication",
+    version="2.0.0",
     lifespan=lifespan
 )
 
-# CORS middleware - Allow all origins for development
+# Enhanced CORS configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:8080", 
+        "http://localhost:8080",
+        "http://localhost:3000", 
+        "http://127.0.0.1:8080",
+        "http://127.0.0.1:3000",
         "https://silverflag.net",
         "http://silverflag.net",
-        "*"  # Allow all origins for development
+        "https://silverflag.net:6969",
+        "http://silverflag.net:6969",
+        "*"  # Allow all origins for now - restrict in production
     ],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
     allow_headers=[
-        "Content-Type",
-        "Authorization", 
-        "X-Requested-With",
         "Accept",
-        "Origin",
-        "User-Agent",
-        "DNT",
-        "Cache-Control",
-        "X-Mx-ReqToken",
-        "Keep-Alive",
+        "Accept-Language", 
+        "Content-Language",
+        "Content-Type",
+        "Authorization",
         "X-Requested-With",
-        "If-Modified-Since"
+        "Origin",
+        "Referer",
+        "User-Agent"
     ],
+    expose_headers=["*"],
+    max_age=86400  # 24 hours
 )
 
-# Add middleware to log requests for debugging
+# Add request/response logging middleware
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    print(f"Incoming request: {request.method} {request.url}")
-    print(f"Headers: {dict(request.headers)}")
+    start_time = time.time()
+    
+    # Log request
+    logger.info(f"Request: {request.method} {request.url}")
     
     try:
         response = await call_next(request)
-        print(f"Response status: {response.status_code}")
+        
+        # Log response
+        process_time = time.time() - start_time
+        logger.info(f"Response: {response.status_code} - {process_time:.3f}s")
+        
         return response
     except Exception as e:
-        print(f"Request failed: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={"detail": f"Internal server error: {str(e)}"}
-        )
+        process_time = time.time() - start_time
+        logger.error(f"Request failed: {str(e)} - {process_time:.3f}s")
+        raise
+
+# Global exception handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled exception: {str(exc)}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"}
+    )
 
 # Include API routes
-app.include_router(router, prefix="/api")
+app.include_router(api_router, prefix="/api")
 
-@app.get("/")
-async def root():
-    return {"message": "Pixel Canvas API", "version": "1.0.0", "status": "running"}
-
+# Health check endpoint
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "timestamp": asyncio.get_event_loop().time()}
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "timestamp": int(time.time()),
+        "version": "2.0.0"
+    }
 
-# Add CORS preflight handler
-@app.options("/{full_path:path}")
-async def preflight_handler(request: Request):
+# Root endpoint
+@app.get("/")
+async def root():
+    """Root endpoint with API information"""
+    return {
+        "message": "Pixel Canvas API",
+        "version": "2.0.0",
+        "docs": "/docs",
+        "health": "/health"
+    }
+
+# Handle preflight OPTIONS requests
+@app.options("/{path:path}")
+async def handle_options(request: Request):
+    """Handle preflight OPTIONS requests"""
     return JSONResponse(
-        content="OK",
+        status_code=200,
+        content={},
         headers={
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Headers": "Accept, Accept-Language, Content-Language, Content-Type, Authorization, X-Requested-With, Origin, Referer, User-Agent",
+            "Access-Control-Max-Age": "86400"
         }
     )
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=9696) 
+    logger.info("Starting Pixel Canvas Backend Server...")
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=9696,
+        reload=True,
+        access_log=True,
+        log_level="info"
+    ) 

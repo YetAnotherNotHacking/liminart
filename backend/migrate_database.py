@@ -1,36 +1,55 @@
 #!/usr/bin/env python3
 """
-Database migration script to fix IP address column types
-This converts INET columns to VARCHAR(45) to support both IPv4 and IPv6
+Database migration script to fix IP address column types.
+This script will recreate all tables with VARCHAR(45) columns instead of INET.
 """
 
 import asyncio
 import asyncpg
 from config import settings
+import sys
 
 async def migrate_database():
-    """Migrate database schema to use String instead of INET for IP addresses"""
+    """Migrate database schema from INET to VARCHAR for IP addresses"""
     
-    # Extract connection parameters from DATABASE_URL
-    # Format: postgresql://user:password@host:port/database
-    url_parts = settings.database_url.replace('postgresql://', '').split('@')
-    user_pass = url_parts[0].split(':')
-    host_db = url_parts[1].split('/')
-    host_port = host_db[0].split(':')
+    # Parse the database URL
+    db_url = settings.database_url
+    if not db_url.startswith('postgresql://'):
+        print("Error: DATABASE_URL must start with 'postgresql://'")
+        sys.exit(1)
     
-    username = user_pass[0]
-    password = user_pass[1] if len(user_pass) > 1 else ''
-    host = host_port[0]
-    port = int(host_port[1]) if len(host_port) > 1 else 5432
-    database = host_db[1]
+    try:
+        # Connect to database
+        conn = await asyncpg.connect(db_url)
+        print("Connected to database successfully")
+        
+        # Check if we need to migrate
+        try:
+            # Check if tables exist and what their schema looks like
+            result = await conn.fetch("""
+                SELECT table_name, column_name, data_type 
+                FROM information_schema.columns 
+                WHERE table_schema = 'public' 
+                AND column_name LIKE '%ip_address%'
+                ORDER BY table_name, column_name;
+            """)
+            
+            inet_columns = [row for row in result if row['data_type'] == 'inet']
+            if inet_columns:
+                print(f"Found {len(inet_columns)} INET columns that need migration:")
+                for row in inet_columns:
+                    print(f"  - {row['table_name']}.{row['column_name']}")
+            else:
+                print("No INET columns found - migration may not be needed")
+                
+        except Exception as e:
+            print(f"Could not check existing schema: {e}")
+            print("Proceeding with full migration...")
     
-    conn = await asyncpg.connect(
-        user=username,
-        password=password,
-        database=database,
-        host=host,
-        port=port
-    )
+    except Exception as e:
+        print(f"Database connection failed: {e}")
+        print("Please ensure PostgreSQL is running and DATABASE_URL is correct")
+        sys.exit(1)
     
     try:
         print("Starting database migration...")
@@ -148,6 +167,13 @@ async def migrate_database():
         
         print("Migration completed successfully!")
         print("All tables have been recreated with VARCHAR(45) IP address columns.")
+        print("\nNew schema summary:")
+        print("- users: user accounts with authentication and profile data")
+        print("- pixels: canvas pixel data with proper IP address storage")
+        print("- user_stats: user/IP statistics with proper indexing")
+        print("- active_users: activity tracking with proper IP address storage")
+        print("- tile_updates: tile modification timestamps")
+        print("- email_verifications: email verification tokens")
         
     except Exception as e:
         print(f"Migration failed: {e}")
@@ -156,4 +182,16 @@ async def migrate_database():
         await conn.close()
 
 if __name__ == "__main__":
-    asyncio.run(migrate_database()) 
+    print("Pixel Canvas Database Migration")
+    print("===============================")
+    print("This will recreate all database tables with the correct schema.")
+    print("WARNING: This will delete all existing data!")
+    print()
+    
+    response = input("Are you sure you want to continue? (yes/no): ").strip().lower()
+    if response != 'yes':
+        print("Migration cancelled.")
+        sys.exit(0)
+    
+    asyncio.run(migrate_database())
+    print("\nMigration completed. You can now restart the backend service.") 

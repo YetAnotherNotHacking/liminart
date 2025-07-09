@@ -30,7 +30,7 @@ class Pixel(Base):
     r = Column(SmallInteger, nullable=False)
     g = Column(SmallInteger, nullable=False)
     b = Column(SmallInteger, nullable=False)
-    ip_address = Column(String(45), nullable=True)  # Changed to String for IPv4/IPv6
+    ip_address = Column(String(45), nullable=True)  # VARCHAR for IPv4/IPv6
     user_id = Column(Integer, nullable=True)  # User reference
     last_updated = Column(Integer, nullable=False)
     
@@ -49,7 +49,7 @@ class UserStats(Base):
     __tablename__ = "user_stats"
     
     id = Column(Integer, primary_key=True, autoincrement=True)  # Proper primary key
-    ip_address = Column(String(45), nullable=True)  # Changed to String
+    ip_address = Column(String(45), nullable=True)  # VARCHAR for IPv4/IPv6
     user_id = Column(Integer, nullable=True, unique=True)  # Unique for user stats
     pixels_placed = Column(Integer, default=0)
     last_placed = Column(Integer, nullable=True)
@@ -58,7 +58,7 @@ class ActiveUser(Base):
     __tablename__ = "active_users"
     
     id = Column(Integer, primary_key=True, autoincrement=True)  # Proper primary key
-    ip_address = Column(String(45), nullable=True)  # Changed to String
+    ip_address = Column(String(45), nullable=True)  # VARCHAR for IPv4/IPv6
     user_id = Column(Integer, nullable=True, unique=True)  # Unique for active users
     last_seen = Column(Integer, nullable=False)
 
@@ -89,7 +89,7 @@ class User(Base):
     
     # Statistics
     total_pixels_placed = Column(Integer, default=0)
-    registration_ip = Column(String(45), nullable=True)  # Changed to String
+    registration_ip = Column(String(45), nullable=True)  # VARCHAR for IPv4/IPv6
 
 class EmailVerification(Base):
     __tablename__ = "email_verifications"
@@ -118,6 +118,6 @@ async def get_db():
             await session.close()
 
 async def init_db():
-    """Initialize database tables"""
+    """Initialize the database tables"""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all) 

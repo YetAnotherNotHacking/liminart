@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, text, delete, and_, or_, desc, cast, String
+from sqlalchemy import select, func, text, delete, and_, or_, desc
 from sqlalchemy.orm import Session
 from database import Pixel, UserStats, ActiveUser, TileUpdate, User, EmailVerification
 from models import PixelRequest, RawPixelRequest, UserStatsResponse, UserCreate, UserLogin, Token, UserProfile, UserStats as UserStatsModel
@@ -10,7 +10,6 @@ import random
 import secrets
 import base64
 from typing import Optional, List, Dict, Tuple
-import ipaddress
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
@@ -24,36 +23,33 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 class PixelService:
     @staticmethod
     async def get_pixel(db: AsyncSession, x: int, y: int) -> Optional[Pixel]:
-        """Get a single pixel"""
-        result = await db.execute(
-            select(Pixel).where(and_(Pixel.x == x, Pixel.y == y))
-        )
+        """Get a pixel at the specified coordinates"""
+        result = await db.execute(select(Pixel).where(Pixel.x == x, Pixel.y == y))
         return result.scalar_one_or_none()
 
     @staticmethod
     async def set_pixel(db: AsyncSession, pixel_data: PixelRequest, ip_address: str, user_id: Optional[int] = None) -> Tuple[bool, Optional[str]]:
-        """Set a pixel with rate limiting"""
-        # Check rate limits
-        if user_id:
-            rate_error = await PixelService._check_user_rate_limit(db, user_id)
-        else:
-            rate_error = await PixelService._check_ip_rate_limit(db, ip_address)
-        
-        if rate_error:
-            return False, rate_error
-        
+        """Set a pixel with rate limiting and validation"""
         # Validate coordinates
         if not (0 <= pixel_data.x < settings.canvas_width and 0 <= pixel_data.y < settings.canvas_height):
             return False, "Coordinates out of bounds"
         
-        # Validate colors
-        if not all(0 <= c <= 255 for c in [pixel_data.r, pixel_data.g, pixel_data.b]):
-            return False, "Color values must be between 0 and 255"
+        # Validate RGB values
+        if not all(0 <= val <= 255 for val in [pixel_data.r, pixel_data.g, pixel_data.b]):
+            return False, "Invalid RGB values"
         
-        timestamp = int(time.time())
+        # Check rate limit
+        if user_id:
+            rate_limit_error = await PixelService._check_user_rate_limit(db, user_id)
+        else:
+            rate_limit_error = await PixelService._check_ip_rate_limit(db, ip_address)
         
-        # Check if pixel already exists
+        if rate_limit_error:
+            return False, rate_limit_error
+        
+        # Check for existing pixel
         existing_pixel = await PixelService.get_pixel(db, pixel_data.x, pixel_data.y)
+        timestamp = int(time.time())
         
         if existing_pixel:
             # Update existing pixel
@@ -103,19 +99,18 @@ class PixelService:
 
     @staticmethod
     async def set_raw_pixel(db: AsyncSession, pixel_data: RawPixelRequest, ip_address: str) -> Tuple[bool, Optional[str]]:
-        """Set a pixel without rate limiting (raw endpoint)"""
+        """Set a pixel without rate limiting (for bots/admin)"""
         # Validate coordinates
         if not (0 <= pixel_data.x < settings.canvas_width and 0 <= pixel_data.y < settings.canvas_height):
             return False, "Coordinates out of bounds"
         
-        # Validate colors
-        if not all(0 <= c <= 255 for c in [pixel_data.r, pixel_data.g, pixel_data.b]):
-            return False, "Color values must be between 0 and 255"
+        # Validate RGB values
+        if not all(0 <= val <= 255 for val in [pixel_data.r, pixel_data.g, pixel_data.b]):
+            return False, "Invalid RGB values"
         
-        timestamp = int(time.time())
-        
-        # Check if pixel already exists
+        # Check for existing pixel
         existing_pixel = await PixelService.get_pixel(db, pixel_data.x, pixel_data.y)
+        timestamp = int(time.time())
         
         if existing_pixel:
             # Update existing pixel
@@ -439,27 +434,24 @@ class AuthService:
             )
             
             db.add(user)
-            await db.flush()  # Get the user ID
+            await db.commit()
+            await db.refresh(user)
             
-            # Create verification token
-            verification_token = secrets.token_urlsafe(32)
+            # Create email verification token
+            token = secrets.token_urlsafe(32)
             expires_at = datetime.utcnow() + timedelta(hours=settings.email_verification_expire_hours)
             
             verification = EmailVerification(
                 user_id=user.id,
-                token=verification_token,
+                token=token,
                 expires_at=expires_at
             )
-            db.add(verification)
             
+            db.add(verification)
             await db.commit()
             
             # Send verification email
-            await EmailService.send_verification_email(
-                user.email, 
-                user.username, 
-                verification_token
-            )
+            await EmailService.send_verification_email(user.email, user.username, token)
             
             return user, None
             
@@ -469,9 +461,9 @@ class AuthService:
     
     @staticmethod
     async def verify_email(db: AsyncSession, token: str) -> Tuple[bool, Optional[str]]:
-        """Verify user email with token"""
+        """Verify email with token"""
         try:
-            # Find verification record
+            # Find the verification record
             result = await db.execute(
                 select(EmailVerification).where(
                     and_(
@@ -486,145 +478,132 @@ class AuthService:
             if not verification:
                 return False, "Invalid or expired verification token"
             
-            # Mark as used
+            # Mark verification as used
             verification.used = True
             
-            # Activate user
-            result = await db.execute(
-                select(User).where(User.id == verification.user_id)
-            )
-            user = result.scalar_one_or_none()
+            # Activate the user
+            user_result = await db.execute(select(User).where(User.id == verification.user_id))
+            user = user_result.scalar_one_or_none()
             
             if user:
                 user.is_active = True
                 user.is_verified = True
-                
-                await db.commit()
-                
-                # Send welcome email
-                await EmailService.send_welcome_email(user.email, user.username)
-                
-                return True, None
-            else:
-                return False, "User not found"
-                
+            
+            await db.commit()
+            return True, None
+            
         except Exception as e:
             await db.rollback()
             return False, f"Verification failed: {str(e)}"
     
     @staticmethod
     async def authenticate_user(db: AsyncSession, username: str, password: str) -> Optional[User]:
-        """Authenticate user login"""
+        """Authenticate user with username/password"""
         result = await db.execute(
-            select(User).where(User.username == username)
+            select(User).where(or_(User.username == username, User.email == username))
         )
         user = result.scalar_one_or_none()
         
-        if not user:
-            return None
-        if not AuthService.verify_password(password, user.hashed_password):
-            return None
-        if not user.is_active:
-            return None
-            
-        # Update last login
-        user.last_login = datetime.utcnow()
-        await db.commit()
+        if user and AuthService.verify_password(password, user.hashed_password):
+            if user.is_active:
+                # Update last login
+                user.last_login = datetime.utcnow()
+                await db.commit()
+                return user
+            else:
+                return None  # Account not activated
         
-        return user
+        return None
     
     @staticmethod
     async def get_user_by_token(db: AsyncSession, token: str) -> Optional[User]:
-        """Get user from JWT token"""
+        """Get user by JWT token"""
         try:
             payload = jwt.decode(token, settings.secret_key, algorithms=[settings.jwt_algorithm])
-            user_id: int = payload.get("user_id")
+            user_id: int = payload.get("sub")
             if user_id is None:
                 return None
         except JWTError:
             return None
         
-        result = await db.execute(
-            select(User).where(User.id == user_id)
-        )
+        result = await db.execute(select(User).where(User.id == user_id))
         return result.scalar_one_or_none()
 
 class UserService:
     @staticmethod
     async def update_profile(db: AsyncSession, user_id: int, profile_data: UserProfile) -> Tuple[bool, Optional[str]]:
-        """Update user profile"""
+        """Update user profile information"""
         try:
-            result = await db.execute(
-                select(User).where(User.id == user_id)
-            )
+            result = await db.execute(select(User).where(User.id == user_id))
             user = result.scalar_one_or_none()
             
             if not user:
                 return False, "User not found"
             
+            # Update profile fields
             if profile_data.display_name is not None:
                 user.display_name = profile_data.display_name
             if profile_data.bio is not None:
                 user.bio = profile_data.bio
-                
+            
             await db.commit()
             return True, None
             
         except Exception as e:
             await db.rollback()
-            return False, str(e)
+            return False, f"Profile update failed: {str(e)}"
     
     @staticmethod
     async def upload_profile_picture(db: AsyncSession, user_id: int, file_data: bytes, content_type: str) -> Tuple[bool, Optional[str]]:
         """Upload and process profile picture"""
         try:
+            # Validate file type
+            if not content_type.startswith('image/'):
+                return False, "File must be an image"
+            
             # Validate file size
             if len(file_data) > settings.max_profile_picture_size:
-                return False, f"File too large. Maximum size is {settings.max_profile_picture_size / 1024 / 1024:.1f}MB"
-            
-            # Validate file type
-            allowed_types = ["image/jpeg", "image/png", "image/gif", "image/webp"]
-            if content_type not in allowed_types:
-                return False, "Invalid file type. Only JPEG, PNG, GIF, and WebP are allowed"
+                return False, f"File too large. Maximum size is {settings.max_profile_picture_size // 1024 // 1024}MB"
             
             # Process image
             try:
                 image = Image.open(io.BytesIO(file_data))
                 
                 # Convert to RGB if necessary
-                if image.mode in ("RGBA", "P"):
-                    image = image.convert("RGB")
+                if image.mode in ('RGBA', 'LA', 'P'):
+                    background = Image.new('RGB', image.size, (255, 255, 255))
+                    if image.mode == 'P':
+                        image = image.convert('RGBA')
+                    background.paste(image, mask=image.split()[-1] if image.mode == 'RGBA' else None)
+                    image = background
                 
-                # Resize to reasonable dimensions
-                max_size = (400, 400)
-                image.thumbnail(max_size, Image.Resampling.LANCZOS)
+                # Resize to 200x200
+                image = image.resize((200, 200), Image.Resampling.LANCZOS)
                 
                 # Save as JPEG
                 output = io.BytesIO()
-                image.save(output, format="JPEG", quality=85)
+                image.save(output, format='JPEG', quality=85, optimize=True)
                 processed_data = output.getvalue()
                 
             except Exception as e:
-                return False, f"Invalid image file: {str(e)}"
+                return False, f"Image processing failed: {str(e)}"
             
             # Update user record
-            result = await db.execute(
-                select(User).where(User.id == user_id)
-            )
+            result = await db.execute(select(User).where(User.id == user_id))
             user = result.scalar_one_or_none()
             
             if not user:
                 return False, "User not found"
             
             user.profile_picture = processed_data
-            user.profile_picture_type = "image/jpeg"
+            user.profile_picture_type = 'image/jpeg'
             
             await db.commit()
             return True, None
             
         except Exception as e:
             await db.rollback()
-            return False, str(e)
+            return False, f"Upload failed: {str(e)}"
     
     @staticmethod
     async def get_profile_picture(db: AsyncSession, user_id: int) -> Tuple[Optional[bytes], Optional[str]]:
@@ -741,4 +720,21 @@ class UserService:
             )
             
         except Exception as e:
-            return None 
+            return None
+    
+    @staticmethod
+    async def search_users(db: AsyncSession, query: str, limit: int = 10) -> List[User]:
+        """Search users by username"""
+        try:
+            search_pattern = f"%{query}%"
+            result = await db.execute(
+                select(User).where(
+                    and_(
+                        User.is_active == True,
+                        User.username.ilike(search_pattern)
+                    )
+                ).limit(limit)
+            )
+            return result.scalars().all()
+        except Exception as e:
+            return [] 

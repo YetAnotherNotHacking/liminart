@@ -155,28 +155,24 @@ async def get_canvas_state(
 
 @router.post("/updates")
 async def get_updates(
-    since: Optional[int] = Query(None, description="Timestamp since last update"),
-    request: Request = None,
+    request: Request,
+    since: Optional[int] = Query(None, description="Timestamp to get updates since"),
+    current_user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get canvas updates since timestamp (for real-time updates)"""
+    """Get pixel updates since a given timestamp"""
     try:
-        # For now, return empty updates
-        # In a full implementation, you'd track changes and return incremental updates
+        # For now, return empty updates - this endpoint is called by frontend
+        # but the current implementation doesn't use incremental updates
         return {
             "success": True,
-            "pixels": [],  # No incremental updates yet
-            "changedTiles": {},  # No tile changes yet
-            "timestamp": int(time.time())
+            "pixels": [],
+            "timestamp": int(time.time()),
+            "changedTiles": {},
+            "tileChecksums": {}
         }
     except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-            "pixels": [],
-            "changedTiles": {},
-            "timestamp": int(time.time())
-        }
+        raise HTTPException(status_code=500, detail=f"Failed to get updates: {str(e)}")
 
 @router.get("/stats", response_model=UserStatsResponse)
 async def get_stats(

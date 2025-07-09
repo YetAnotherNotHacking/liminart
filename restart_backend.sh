@@ -1,31 +1,44 @@
 #!/bin/bash
 
-echo "Restarting Python backend with database fixes..."
+echo "=== Pixel Canvas Backend Restart ==="
+echo "This script will restart the backend with database migration"
+echo
 
-# Stop the current container
-echo "Stopping current container..."
-sudo docker stop $(sudo docker ps -q --filter ancestor=pixel-canvas-backend) 2>/dev/null
+# Change to backend directory
+cd backend
+
+# Stop any running containers
+echo "Stopping existing containers..."
+docker-compose down
 
 # Run database migration
-echo "Running database migration..."
-cd backend
+echo "Running database migration to fix INET column issues..."
 python3 migrate_database.py
 
-# Rebuild the container with the latest code
-echo "Rebuilding container..."
-sudo docker build --no-cache -t pixel-canvas-backend .
+# Wait a moment for cleanup
+sleep 2
 
-# Run the container
-echo "Starting updated container..."
-sudo docker run -d -p 6969:9696 \
-  -e DATABASE_URL="postgresql://pixel_user:secure_password_2024@host.docker.internal:5432/pixel_canvas" \
-  -e SECRET_KEY="your-super-secret-key-change-this-in-production-2024" \
-  -e SMTP_SERVER="smtp.gmail.com" \
-  -e SMTP_PORT="587" \
-  -e SMTP_USERNAME="your-email@gmail.com" \
-  -e SMTP_PASSWORD="your-app-password" \
-  -e FRONTEND_URL="https://silverflag.net" \
-  pixel-canvas-backend
+# Start the backend
+echo "Starting backend services..."
+docker-compose up -d
 
-echo "Backend restarted! Check logs with: sudo docker logs \$(sudo docker ps -q --filter ancestor=pixel-canvas-backend)"
-echo "Test the API with: curl https://silverflag.net:6969/api/health" 
+# Wait for services to start
+echo "Waiting for services to start..."
+sleep 10
+
+# Check if services are running
+echo "Checking service status..."
+docker-compose ps
+
+# Check logs
+echo "Recent logs:"
+docker-compose logs --tail=20
+
+echo
+echo "=== Backend Restart Complete ==="
+echo "Backend should be running at: http://localhost:9696"
+echo "API documentation: http://localhost:9696/docs"
+echo "Health check: http://localhost:9696/health"
+echo
+echo "To view logs: docker-compose logs -f"
+echo "To stop: docker-compose down" X
