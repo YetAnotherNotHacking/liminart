@@ -1,16 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, Query
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, Request, Query, File, UploadFile
+from fastapi.responses import JSONResponse, Response
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
 from models import *
-from services import PixelService, StatsService, AdminService
+from services import PixelService, StatsService, AdminService, AuthService, UserService
 from config import settings
 import time
 import psutil
 import hashlib
 from typing import Optional, Dict, List
+from sqlalchemy import text
 
 router = APIRouter()
+security = HTTPBearer(auto_error=False)
 
 def get_client_ip(request: Request) -> str:
     """Get client IP address"""
@@ -19,31 +22,49 @@ def get_client_ip(request: Request) -> str:
         return forwarded.split(",")[0].strip()
     return request.client.host
 
-def mask_ip(ip: str) -> str:
-    """Mask IP address for privacy"""
-    parts = ip.split('.')
-    if len(parts) == 4:
-        parts[3] = 'xxx'
-        return '.'.join(parts)
-    else:
-        return ip[:8] + "xxx"
+async def get_current_user(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: AsyncSession = Depends(get_db)
+) -> Optional[User]:
+    """Get current user from JWT token (optional)"""
+    if not credentials:
+        return None
+    
+    try:
+        user = await AuthService.get_user_by_token(db, credentials.credentials)
+        return user
+    except Exception:
+        return None
 
-@router.get("/ip", response_model=IPResponse)
-async def get_ip(request: Request):
-    """Get masked client IP address"""
-    ip = get_client_ip(request)
-    return IPResponse(ip=mask_ip(ip))
+async def get_current_user_required(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: AsyncSession = Depends(get_db)
+) -> User:
+    """Get current user from JWT token (required)"""
+    if not credentials:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    user = await AuthService.get_user_by_token(db, credentials.credentials)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid authentication credentials")
+    
+    return user
 
+# Canvas Operations
 @router.post("/pixel", response_model=SetPixelResponse)
 async def set_pixel(
     pixel_data: PixelRequest,
     request: Request,
+    current_user: Optional[User] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Set a pixel on the canvas with checksum verification"""
     ip_address = get_client_ip(request)
+    user_id = current_user.id if current_user else None
     
-    success, error = await PixelService.set_pixel(db, pixel_data, ip_address)
+    success, error = await PixelService.set_pixel(db, pixel_data, ip_address, user_id)
     
     if not success:
         if error == "checksum_mismatch":
@@ -52,7 +73,7 @@ async def set_pixel(
             raise HTTPException(status_code=400, detail=error)
     
     # Get updated stats
-    stats = await StatsService.get_user_stats(db, ip_address)
+    stats = await StatsService.get_user_stats(db, ip_address, user_id)
     
     # Calculate new checksum for the tile
     tile_x = pixel_data.x // settings.tile_size
@@ -65,13 +86,13 @@ async def set_pixel(
         checksum=new_checksum
     )
 
-@router.post("/pixel/raw", response_model=SetPixelResponse)
+@router.post("/pixel/raw", response_model=dict)
 async def set_raw_pixel(
     pixel_data: RawPixelRequest,
     request: Request,
     db: AsyncSession = Depends(get_db)
 ):
-    """Set a pixel without checksum verification - for bots"""
+    """Set a pixel without checksum or rate limiting - for bots"""
     ip_address = get_client_ip(request)
     
     success, error = await PixelService.set_raw_pixel(db, pixel_data, ip_address)
@@ -79,205 +100,122 @@ async def set_raw_pixel(
     if not success:
         raise HTTPException(status_code=400, detail=error)
     
-    # Get updated stats
-    stats = await StatsService.get_user_stats(db, ip_address)
-    
-    return SetPixelResponse(
-        success=True,
-        stats=stats
-    )
+    return {"success": True, "message": "Pixel set successfully"}
 
-@router.get("/state")
-@router.post("/state")
-async def get_state(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    info: Optional[bool] = Query(False),
+@router.get("/state", response_model=StateResponse)
+@router.post("/state", response_model=StateResponse)
+async def get_canvas_state(
+    state_request: Optional[StateRequest] = None,
     tile_x: Optional[int] = Query(None),
     tile_y: Optional[int] = Query(None),
-    since: Optional[int] = Query(0),
-    verify_checksums: Optional[bool] = Query(False),
-    state_request: Optional[CanvasStateRequest] = None
-):
-    """Get canvas state - supports multiple modes"""
-    
-    # Handle POST request body
-    if request.method == "POST" and not state_request:
-        try:
-            body = await request.json()
-            state_request = CanvasStateRequest(**body)
-        except:
-            state_request = CanvasStateRequest()
-    
-    current_timestamp = int(time.time())
-    
-    # Info mode - return canvas metadata
-    if info:
-        return {
-            "success": True,
-            "canvas_width": settings.canvas_width,
-            "canvas_height": settings.canvas_height,
-            "tile_size": settings.tile_size,
-            "timestamp": current_timestamp
-        }
-    
-    # Specific tile mode
-    if tile_x is not None and tile_y is not None:
-        pixels = await PixelService.get_tile_pixels(db, tile_x, tile_y)
-        checksum = await PixelService.calculate_tile_checksum(db, tile_x, tile_y)
-        
-        return CanvasStateResponse(
-            success=True,
-            pixels=[
-                PixelResponse(
-                    x=p.x, y=p.y, r=p.r, g=p.g, b=p.b,
-                    tile_x=p.tile_x, tile_y=p.tile_y
-                ) for p in pixels
-            ],
-            timestamp=current_timestamp,
-            tile_checksums={f"{tile_x},{tile_y}": checksum}
-        )
-    
-    # Updates since timestamp
-    if since > 0:
-        pixels = await PixelService.get_updated_pixels(db, since)
-        
-        # Calculate checksums for changed tiles
-        changed_tiles = set()
-        tile_checksums = {}
-        
-        for pixel in pixels:
-            tile_key = f"{pixel.tile_x},{pixel.tile_y}"
-            changed_tiles.add(tile_key)
-        
-        # If client provided checksums, only return tiles that changed
-        if state_request and state_request.checksums:
-            pixels_to_return = []
-            for pixel in pixels:
-                tile_key = f"{pixel.tile_x},{pixel.tile_y}"
-                if tile_key in changed_tiles:
-                    # Calculate current checksum
-                    current_checksum = await PixelService.calculate_tile_checksum(
-                        db, pixel.tile_x, pixel.tile_y
-                    )
-                    client_checksum = state_request.checksums.get(tile_key)
-                    
-                    if current_checksum != client_checksum:
-                        pixels_to_return.append(pixel)
-                        tile_checksums[tile_key] = current_checksum
-            
-            pixels = pixels_to_return
-        else:
-            # Calculate checksums for all changed tiles
-            for tile_key in changed_tiles:
-                tile_x, tile_y = map(int, tile_key.split(','))
-                tile_checksums[tile_key] = await PixelService.calculate_tile_checksum(
-                    db, tile_x, tile_y
-                )
-        
-        return CanvasStateResponse(
-            success=True,
-            pixels=[
-                PixelResponse(
-                    x=p.x, y=p.y, r=p.r, g=p.g, b=p.b,
-                    tile_x=p.tile_x, tile_y=p.tile_y
-                ) for p in pixels
-            ],
-            timestamp=current_timestamp,
-            tile_checksums=tile_checksums,
-            changed_tiles=list(changed_tiles)
-        )
-    
-    # Default - return empty state
-    return CanvasStateResponse(
-        success=True,
-        pixels=[],
-        timestamp=current_timestamp
-    )
-
-@router.get("/stats", response_model=StatsResponse)
-async def get_stats(request: Request, db: AsyncSession = Depends(get_db)):
-    """Get canvas statistics"""
-    ip_address = get_client_ip(request)
-    
-    user_stats = await StatsService.get_user_stats(db, ip_address)
-    active_users = await StatsService.get_active_users_count(db)
-    top_contributor = await StatsService.get_top_contributor(db)
-    
-    return StatsResponse(
-        user_stats=user_stats,
-        active_users=active_users,
-        top_contributor=top_contributor
-    )
-
-@router.get("/canvas")
-async def get_canvas(
-    format: str = Query("json", regex="^(json|binary|csv|2darray)$"),
+    checksum: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
-    """Export canvas data in various formats"""
-    # This is a simplified version - full implementation would handle large datasets
-    from sqlalchemy import select
-    from database import Pixel
+    """Get canvas state/tiles"""
+    # Handle both GET and POST requests
+    if state_request:
+        tile_x = state_request.tile_x
+        tile_y = state_request.tile_y
+        checksum = state_request.checksum
     
-    result = await db.execute(select(Pixel))
-    pixels = result.scalars().all()
+    if tile_x is None or tile_y is None:
+        raise HTTPException(status_code=400, detail="tile_x and tile_y are required")
     
-    if format == "json":
-        return {
-            "success": True,
-            "pixels": [
-                {"x": p.x, "y": p.y, "r": p.r, "g": p.g, "b": p.b}
-                for p in pixels
-            ]
-        }
-    elif format == "csv":
-        from fastapi.responses import PlainTextResponse
-        csv_data = "x,y,r,g,b\n"
-        for p in pixels:
-            csv_data += f"{p.x},{p.y},{p.r},{p.g},{p.b}\n"
-        return PlainTextResponse(csv_data, media_type="text/csv")
-    elif format == "2darray":
-        # Create 2D array representation
-        canvas = [[[255, 255, 255] for _ in range(settings.canvas_width)] 
-                 for _ in range(settings.canvas_height)]
+    # Calculate current checksum
+    current_checksum = await PixelService.calculate_tile_checksum(db, tile_x, tile_y)
+    checksum_match = (checksum == current_checksum) if checksum else False
+    
+    tiles = []
+    if not checksum_match:
+        # Get tile data
+        pixels = await PixelService.get_tile_pixels(db, tile_x, tile_y)
         
-        for p in pixels:
-            if 0 <= p.x < settings.canvas_width and 0 <= p.y < settings.canvas_height:
-                canvas[p.y][p.x] = [p.r, p.g, p.b]
+        # Create base64 encoded tile data
+        tile_data = []
+        for pixel in pixels:
+            tile_data.append(f"{pixel.x},{pixel.y},{pixel.r},{pixel.g},{pixel.b}")
         
-        return {"success": True, "canvas": canvas}
-    else:
-        raise HTTPException(status_code=400, detail="Unsupported format")
+        import base64
+        encoded_data = base64.b64encode("|".join(tile_data).encode()).decode()
+        
+        tiles.append(TileData(
+            tile_x=tile_x,
+            tile_y=tile_y,
+            data=encoded_data,
+            checksum=current_checksum
+        ))
+    
+    return StateResponse(
+        canvas_width=settings.canvas_width,
+        canvas_height=settings.canvas_height,
+        tile_size=settings.tile_size,
+        checksum_match=checksum_match,
+        tiles=tiles
+    )
 
-@router.get("/monitor", response_model=MonitorResponse)
+@router.get("/stats", response_model=UserStatsResponse)
+async def get_stats(
+    request: Request,
+    current_user: Optional[User] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get user and canvas statistics"""
+    ip_address = get_client_ip(request)
+    user_id = current_user.id if current_user else None
+    
+    return await StatsService.get_user_stats(db, ip_address, user_id)
+
+@router.get("/canvas")
+async def export_canvas(
+    export_request: CanvasExportRequest = Depends(),
+    db: AsyncSession = Depends(get_db)
+):
+    """Export canvas data"""
+    # This is a simplified implementation
+    # In production, you'd want to implement proper export logic
+    raise HTTPException(status_code=501, detail="Canvas export not yet implemented")
+
+# Utility endpoints
+@router.get("/ip")
+async def get_ip(request: Request):
+    """Get masked client IP"""
+    ip = get_client_ip(request)
+    # Mask last octet for privacy
+    ip_parts = ip.split('.')
+    if len(ip_parts) == 4:
+        ip_parts[3] = 'xxx'
+        masked_ip = '.'.join(ip_parts)
+    else:
+        masked_ip = ip[:8] + "xxx"
+    
+    return {"ip": masked_ip}
+
+@router.get("/monitor", response_model=HealthResponse)
 async def monitor(db: AsyncSession = Depends(get_db)):
-    """System monitoring endpoint"""
-    from sqlalchemy import select, func
-    from database import Pixel, ActiveUser
+    """System health monitoring"""
+    try:
+        # Test database connection
+        await db.execute(text("SELECT 1"))
+        db_status = "healthy"
+    except Exception:
+        db_status = "unhealthy"
     
-    # Get database stats
-    result = await db.execute(select(func.count(Pixel.x)))
-    total_pixels = result.scalar_one_or_none() or 0
-    
-    active_users = await StatsService.get_active_users_count(db)
-    
-    # Get memory usage
+    # Get system info
     memory = psutil.virtual_memory()
+    uptime = time.time() - psutil.boot_time()
     
-    return MonitorResponse(
-        success=True,
-        timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
-        database_status="Connected",
-        total_pixels=total_pixels,
-        active_users=active_users,
+    return HealthResponse(
+        status="healthy" if db_status == "healthy" else "degraded",
+        uptime=uptime,
         memory_usage={
             "total": memory.total,
             "available": memory.available,
             "percent": memory.percent
-        }
+        },
+        database_status=db_status
     )
 
+# Admin endpoints
 @router.post("/admin/scramble")
 async def admin_scramble(
     request_data: AdminScrambleRequest,
@@ -294,31 +232,171 @@ async def admin_scramble(
     else:
         raise HTTPException(status_code=500, detail="Failed to scramble canvas")
 
-@router.post("/admin/reset")
-async def admin_reset(
-    request_data: AdminResetRequest,
+# Authentication endpoints
+@router.post("/auth/register", response_model=dict)
+async def register(
+    user_data: UserCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
-    """Reset canvas - admin only"""
-    if request_data.password != settings.admin_password:
-        raise HTTPException(status_code=403, detail="Invalid admin password")
+    """Register new user"""
+    ip_address = get_client_ip(request)
     
-    # This would implement canvas reset logic similar to make_board_white.php
-    # For now, just return success
-    return {"success": True, "message": f"Canvas reset with pattern: {request_data.pattern}"}
-
-# Future auth endpoints
-@router.post("/auth/register", response_model=User)
-async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
-    """Register new user - placeholder for future implementation"""
-    raise HTTPException(status_code=501, detail="User registration not yet implemented")
+    user, error = await AuthService.create_user(db, user_data, ip_address)
+    
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+    
+    return {
+        "success": True,
+        "message": "User registered successfully. Please check your email to verify your account.",
+        "user_id": user.id
+    }
 
 @router.post("/auth/login", response_model=Token)
-async def login(user_data: UserLogin, db: AsyncSession = Depends(get_db)):
-    """Login user - placeholder for future implementation"""
-    raise HTTPException(status_code=501, detail="User login not yet implemented")
+async def login(
+    user_data: UserLogin,
+    db: AsyncSession = Depends(get_db)
+):
+    """Login user"""
+    user = await AuthService.authenticate_user(db, user_data.username, user_data.password)
+    
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    
+    # Create access token
+    access_token = AuthService.create_access_token(
+        data={"user_id": user.id, "username": user.username}
+    )
+    
+    return Token(
+        access_token=access_token,
+        token_type="bearer",
+        expires_in=settings.access_token_expire_minutes * 60
+    )
+
+@router.post("/auth/verify-email")
+async def verify_email(
+    verification_data: EmailVerificationRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """Verify user email"""
+    success, error = await AuthService.verify_email(db, verification_data.token)
+    
+    if not success:
+        raise HTTPException(status_code=400, detail=error)
+    
+    return {"success": True, "message": "Email verified successfully"}
 
 @router.get("/auth/me", response_model=User)
-async def get_current_user(db: AsyncSession = Depends(get_db)):
-    """Get current user - placeholder for future implementation"""
-    raise HTTPException(status_code=501, detail="User authentication not yet implemented") 
+async def get_current_user_info(
+    current_user: User = Depends(get_current_user_required)
+):
+    """Get current user information"""
+    # Add profile picture flag
+    user_dict = current_user.__dict__.copy()
+    user_dict["has_profile_picture"] = current_user.profile_picture is not None
+    
+    return User(**user_dict)
+
+# User profile endpoints
+@router.get("/user/profile", response_model=User)
+async def get_user_profile(
+    current_user: User = Depends(get_current_user_required)
+):
+    """Get user profile"""
+    user_dict = current_user.__dict__.copy()
+    user_dict["has_profile_picture"] = current_user.profile_picture is not None
+    
+    return User(**user_dict)
+
+@router.put("/user/profile")
+async def update_user_profile(
+    profile_data: UserProfile,
+    current_user: User = Depends(get_current_user_required),
+    db: AsyncSession = Depends(get_db)
+):
+    """Update user profile"""
+    success, error = await UserService.update_profile(db, current_user.id, profile_data)
+    
+    if not success:
+        raise HTTPException(status_code=400, detail=error)
+    
+    return {"success": True, "message": "Profile updated successfully"}
+
+@router.post("/user/profile-picture")
+async def upload_profile_picture(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user_required),
+    db: AsyncSession = Depends(get_db)
+):
+    """Upload profile picture"""
+    # Read file data
+    file_data = await file.read()
+    
+    success, error = await UserService.upload_profile_picture(
+        db, current_user.id, file_data, file.content_type
+    )
+    
+    if not success:
+        raise HTTPException(status_code=400, detail=error)
+    
+    return {"success": True, "message": "Profile picture uploaded successfully"}
+
+@router.get("/user/profile-picture/{user_id}")
+async def get_profile_picture(
+    user_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get user profile picture"""
+    picture_data, content_type = await UserService.get_profile_picture(db, user_id)
+    
+    if not picture_data:
+        raise HTTPException(status_code=404, detail="Profile picture not found")
+    
+    return Response(content=picture_data, media_type=content_type)
+
+@router.get("/user/stats", response_model=UserStats)
+async def get_user_statistics(
+    current_user: User = Depends(get_current_user_required),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get detailed user statistics"""
+    stats = await UserService.get_user_statistics(db, current_user.id)
+    
+    if not stats:
+        raise HTTPException(status_code=404, detail="User statistics not found")
+    
+    return stats
+
+@router.get("/user/search")
+async def search_users(
+    q: str = Query(..., min_length=3, max_length=50),
+    limit: int = Query(10, ge=1, le=50),
+    db: AsyncSession = Depends(get_db)
+):
+    """Search users by username"""
+    # Simple implementation - in production you'd want full-text search
+    from sqlalchemy import select, func
+    from database import User
+    
+    result = await db.execute(
+        select(User.id, User.username, User.display_name, User.total_pixels_placed, User.created_at)
+        .where(User.username.ilike(f"%{q}%"))
+        .where(User.is_active == True)
+        .order_by(User.total_pixels_placed.desc())
+        .limit(limit)
+    )
+    
+    users = []
+    for row in result.fetchall():
+        users.append(UserSearchResult(
+            id=row[0],
+            username=row[1],
+            display_name=row[2],
+            total_pixels_placed=row[3],
+            created_at=row[4],
+            has_profile_picture=False  # You'd check this in a real implementation
+        ))
+    
+    return {"users": users} 

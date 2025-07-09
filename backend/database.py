@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, SmallInteger, String, DateTime, Index, text
+from sqlalchemy import create_engine, Column, Integer, SmallInteger, String, DateTime, Index, text, Boolean, LargeBinary, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.dialects.postgresql import INET
@@ -31,7 +31,8 @@ class Pixel(Base):
     r = Column(SmallInteger, nullable=False)
     g = Column(SmallInteger, nullable=False)
     b = Column(SmallInteger, nullable=False)
-    ip_address = Column(INET, nullable=False)
+    ip_address = Column(INET, nullable=True)  # Made nullable for user pixels
+    user_id = Column(Integer, nullable=True)  # New user reference
     last_updated = Column(Integer, nullable=False)
     
     # Computed tile coordinates
@@ -48,14 +49,16 @@ class Pixel(Base):
 class UserStats(Base):
     __tablename__ = "user_stats"
     
-    ip_address = Column(INET, primary_key=True)
+    ip_address = Column(INET, primary_key=True, nullable=True)  # Made nullable
+    user_id = Column(Integer, primary_key=True, nullable=True)  # New user reference
     pixels_placed = Column(Integer, default=0)
     last_placed = Column(Integer, nullable=True)
 
 class ActiveUser(Base):
     __tablename__ = "active_users"
     
-    ip_address = Column(INET, primary_key=True)
+    ip_address = Column(INET, primary_key=True, nullable=True)  # Made nullable
+    user_id = Column(Integer, primary_key=True, nullable=True)  # New user reference
     last_seen = Column(Integer, nullable=False)
 
 class TileUpdate(Base):
@@ -69,17 +72,39 @@ class User(Base):
     __tablename__ = "users"
     
     id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True)
-    email = Column(String, unique=True, index=True)
-    hashed_password = Column(String)
-    is_active = Column(Integer, default=1)
+    username = Column(String(50), unique=True, index=True, nullable=False)
+    email = Column(String(255), unique=True, index=True, nullable=False)
+    hashed_password = Column(String(255), nullable=False)
+    is_active = Column(Boolean, default=False)  # Email verification required
+    is_verified = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    last_login = Column(DateTime, nullable=True)
+    
+    # Profile information
+    display_name = Column(String(100), nullable=True)
+    bio = Column(Text, nullable=True)
+    profile_picture = Column(LargeBinary, nullable=True)
+    profile_picture_type = Column(String(50), nullable=True)  # MIME type
+    
+    # Statistics
+    total_pixels_placed = Column(Integer, default=0)
+    registration_ip = Column(INET, nullable=True)
 
-# Create indexes
-Index('idx_pixels_last_updated', Pixel.last_updated)
+class EmailVerification(Base):
+    __tablename__ = "email_verifications"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=False)
+    token = Column(String(255), unique=True, index=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+    used = Column(Boolean, default=False)
+
+# Database indexes for performance
 Index('idx_pixels_tile', Pixel.tile_x, Pixel.tile_y)
-Index('idx_pixels_ip', Pixel.ip_address)
-Index('idx_user_stats_last_placed', UserStats.last_placed)
+Index('idx_pixels_user', Pixel.user_id)
+Index('idx_user_stats_user', UserStats.user_id)
+Index('idx_active_users_user', ActiveUser.user_id)
 
 async def get_db():
     async with async_session() as session:
@@ -88,19 +113,7 @@ async def get_db():
         finally:
             await session.close()
 
-def get_sync_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
 async def init_db():
     """Initialize database tables"""
-    try:
-        # Use sync engine for table creation
-        Base.metadata.create_all(bind=sync_engine)
-        print("Database tables created successfully")
-    except Exception as e:
-        print(f"Error creating database tables: {e}")
-        raise 
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all) 
