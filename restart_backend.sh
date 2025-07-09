@@ -6,9 +6,13 @@ echo "Restarting Python backend with database fixes..."
 echo "Stopping current container..."
 sudo docker stop $(sudo docker ps -q --filter ancestor=pixel-canvas-backend) 2>/dev/null
 
+# Run database migration
+echo "Running database migration..."
+cd backend
+python3 migrate_database.py
+
 # Rebuild the container with the latest code
 echo "Rebuilding container..."
-cd backend
 sudo docker build --no-cache -t pixel-canvas-backend .
 
 # Run the container
@@ -23,4 +27,5 @@ sudo docker run -d -p 6969:9696 \
   -e FRONTEND_URL="https://silverflag.net" \
   pixel-canvas-backend
 
-echo "Backend restarted! Check logs with: sudo docker logs \$(sudo docker ps -q --filter ancestor=pixel-canvas-backend)" 
+echo "Backend restarted! Check logs with: sudo docker logs \$(sudo docker ps -q --filter ancestor=pixel-canvas-backend)"
+echo "Test the API with: curl https://silverflag.net:6969/api/health" 
