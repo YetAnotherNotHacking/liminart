@@ -24,126 +24,143 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 class PixelService:
     @staticmethod
     async def get_pixel(db: AsyncSession, x: int, y: int) -> Optional[Pixel]:
+        """Get a single pixel"""
         result = await db.execute(
-            select(Pixel).where(Pixel.x == x, Pixel.y == y)
+            select(Pixel).where(and_(Pixel.x == x, Pixel.y == y))
         )
         return result.scalar_one_or_none()
-    
+
     @staticmethod
     async def set_pixel(db: AsyncSession, pixel_data: PixelRequest, ip_address: str, user_id: Optional[int] = None) -> Tuple[bool, Optional[str]]:
-        """Set a pixel and return success status and optional error message"""
+        """Set a pixel with rate limiting"""
+        # Check rate limits
+        if user_id:
+            rate_error = await PixelService._check_user_rate_limit(db, user_id)
+        else:
+            rate_error = await PixelService._check_ip_rate_limit(db, ip_address)
+        
+        if rate_error:
+            return False, rate_error
+        
+        # Validate coordinates
+        if not (0 <= pixel_data.x < settings.canvas_width and 0 <= pixel_data.y < settings.canvas_height):
+            return False, "Coordinates out of bounds"
+        
+        # Validate colors
+        if not all(0 <= c <= 255 for c in [pixel_data.r, pixel_data.g, pixel_data.b]):
+            return False, "Color values must be between 0 and 255"
+        
+        timestamp = int(time.time())
+        
+        # Check if pixel already exists
+        existing_pixel = await PixelService.get_pixel(db, pixel_data.x, pixel_data.y)
+        
+        if existing_pixel:
+            # Update existing pixel
+            existing_pixel.r = pixel_data.r
+            existing_pixel.g = pixel_data.g
+            existing_pixel.b = pixel_data.b
+            existing_pixel.ip_address = ip_address if not user_id else None
+            existing_pixel.user_id = user_id
+            existing_pixel.last_updated = timestamp
+            existing_pixel.tile_x = pixel_data.x // settings.tile_size
+            existing_pixel.tile_y = pixel_data.y // settings.tile_size
+        else:
+            # Create new pixel
+            new_pixel = Pixel(
+                x=pixel_data.x,
+                y=pixel_data.y,
+                r=pixel_data.r,
+                g=pixel_data.g,
+                b=pixel_data.b,
+                ip_address=ip_address if not user_id else None,
+                user_id=user_id,
+                last_updated=timestamp,
+                tile_x=pixel_data.x // settings.tile_size,
+                tile_y=pixel_data.y // settings.tile_size
+            )
+            db.add(new_pixel)
+        
+        # Update statistics
+        if user_id:
+            await PixelService._update_user_stats_by_user(db, user_id, timestamp)
+            await PixelService._update_active_user(db, None, user_id, timestamp)
+        else:
+            await PixelService._update_user_stats_by_ip(db, ip_address, timestamp)
+            await PixelService._update_active_user(db, ip_address, None, timestamp)
+        
+        # Update tile timestamp
+        tile_x = pixel_data.x // settings.tile_size
+        tile_y = pixel_data.y // settings.tile_size
+        await PixelService._update_tile_timestamp(db, tile_x, tile_y, timestamp)
+        
         try:
-            # Check rate limiting (only for authenticated users, not IP-based for raw)
-            if user_id and settings.rate_limit_seconds > 0:
-                rate_limit_error = await PixelService._check_user_rate_limit(db, user_id)
-                if rate_limit_error:
-                    return False, rate_limit_error
-            elif not user_id and settings.rate_limit_seconds > 0:
-                rate_limit_error = await PixelService._check_ip_rate_limit(db, ip_address)
-                if rate_limit_error:
-                    return False, rate_limit_error
-            
-            # Calculate tile coordinates
-            tile_x = pixel_data.x // settings.tile_size
-            tile_y = pixel_data.y // settings.tile_size
-            
-            # If checksum provided, verify it
-            if pixel_data.checksum:
-                current_checksum = await PixelService.calculate_tile_checksum(db, tile_x, tile_y)
-                if current_checksum != pixel_data.checksum:
-                    return False, "checksum_mismatch"
-            
-            timestamp = int(time.time())
-            
-            # Create or update pixel
-            pixel = await PixelService.get_pixel(db, pixel_data.x, pixel_data.y)
-            if pixel:
-                pixel.r = pixel_data.r
-                pixel.g = pixel_data.g
-                pixel.b = pixel_data.b
-                pixel.ip_address = ip_address if not user_id else None
-                pixel.user_id = user_id
-                pixel.last_updated = timestamp
-                pixel.tile_x = tile_x
-                pixel.tile_y = tile_y
-            else:
-                pixel = Pixel(
-                    x=pixel_data.x,
-                    y=pixel_data.y,
-                    r=pixel_data.r,
-                    g=pixel_data.g,
-                    b=pixel_data.b,
-                    ip_address=ip_address if not user_id else None,
-                    user_id=user_id,
-                    last_updated=timestamp,
-                    tile_x=tile_x,
-                    tile_y=tile_y
-                )
-                db.add(pixel)
-            
-            # Update user stats
-            if user_id:
-                await PixelService._update_user_stats_by_user(db, user_id, timestamp)
-            else:
-                await PixelService._update_user_stats_by_ip(db, ip_address, timestamp)
-            
-            # Update tile timestamp
-            await PixelService._update_tile_timestamp(db, tile_x, tile_y, timestamp)
-            
             await db.commit()
             return True, None
-            
         except Exception as e:
             await db.rollback()
-            return False, str(e)
-    
+            return False, f"Database error: {str(e)}"
+
     @staticmethod
     async def set_raw_pixel(db: AsyncSession, pixel_data: RawPixelRequest, ip_address: str) -> Tuple[bool, Optional[str]]:
-        """Set a raw pixel without rate limiting or user auth - for bots"""
+        """Set a pixel without rate limiting (raw endpoint)"""
+        # Validate coordinates
+        if not (0 <= pixel_data.x < settings.canvas_width and 0 <= pixel_data.y < settings.canvas_height):
+            return False, "Coordinates out of bounds"
+        
+        # Validate colors
+        if not all(0 <= c <= 255 for c in [pixel_data.r, pixel_data.g, pixel_data.b]):
+            return False, "Color values must be between 0 and 255"
+        
+        timestamp = int(time.time())
+        
+        # Check if pixel already exists
+        existing_pixel = await PixelService.get_pixel(db, pixel_data.x, pixel_data.y)
+        
+        if existing_pixel:
+            # Update existing pixel
+            existing_pixel.r = pixel_data.r
+            existing_pixel.g = pixel_data.g
+            existing_pixel.b = pixel_data.b
+            existing_pixel.ip_address = ip_address
+            existing_pixel.user_id = None  # Raw pixels are not associated with users
+            existing_pixel.last_updated = timestamp
+            existing_pixel.tile_x = pixel_data.x // settings.tile_size
+            existing_pixel.tile_y = pixel_data.y // settings.tile_size
+        else:
+            # Create new pixel
+            new_pixel = Pixel(
+                x=pixel_data.x,
+                y=pixel_data.y,
+                r=pixel_data.r,
+                g=pixel_data.g,
+                b=pixel_data.b,
+                ip_address=ip_address,
+                user_id=None,
+                last_updated=timestamp,
+                tile_x=pixel_data.x // settings.tile_size,
+                tile_y=pixel_data.y // settings.tile_size
+            )
+            db.add(new_pixel)
+        
+        # Update tile timestamp
+        tile_x = pixel_data.x // settings.tile_size
+        tile_y = pixel_data.y // settings.tile_size
+        await PixelService._update_tile_timestamp(db, tile_x, tile_y, timestamp)
+        
         try:
-            timestamp = int(time.time())
-            tile_x = pixel_data.x // settings.tile_size
-            tile_y = pixel_data.y // settings.tile_size
-            
-            # Create or update pixel
-            pixel = await PixelService.get_pixel(db, pixel_data.x, pixel_data.y)
-            if pixel:
-                pixel.r = pixel_data.r
-                pixel.g = pixel_data.g
-                pixel.b = pixel_data.b
-                pixel.ip_address = ip_address
-                pixel.user_id = None
-                pixel.last_updated = timestamp
-                pixel.tile_x = tile_x
-                pixel.tile_y = tile_y
-            else:
-                pixel = Pixel(
-                    x=pixel_data.x,
-                    y=pixel_data.y,
-                    r=pixel_data.r,
-                    g=pixel_data.g,
-                    b=pixel_data.b,
-                    ip_address=ip_address,
-                    user_id=None,
-                    last_updated=timestamp,
-                    tile_x=tile_x,
-                    tile_y=tile_y
-                )
-                db.add(pixel)
-            
-            # Update tile timestamp
-            await PixelService._update_tile_timestamp(db, tile_x, tile_y, timestamp)
-            
             await db.commit()
             return True, None
-            
         except Exception as e:
             await db.rollback()
-            return False, str(e)
-    
+            return False, f"Database error: {str(e)}"
+
     @staticmethod
     async def _check_user_rate_limit(db: AsyncSession, user_id: int) -> Optional[str]:
-        """Check if user is rate limited"""
+        """Check rate limit for authenticated user"""
+        if settings.rate_limit_seconds <= 0:
+            return None
+        
         result = await db.execute(
             select(UserStats.last_placed).where(UserStats.user_id == user_id)
         )
@@ -158,9 +175,12 @@ class PixelService:
 
     @staticmethod
     async def _check_ip_rate_limit(db: AsyncSession, ip_address: str) -> Optional[str]:
-        """Check if IP is rate limited"""
+        """Check rate limit for anonymous user by IP"""
+        if settings.rate_limit_seconds <= 0:
+            return None
+        
         result = await db.execute(
-            select(UserStats.last_placed).where(cast(UserStats.ip_address, String) == ip_address)
+            select(UserStats.last_placed).where(UserStats.ip_address == ip_address)
         )
         last_placed = result.scalar_one_or_none()
         
@@ -170,77 +190,71 @@ class PixelService:
                 return f"Rate limited. Wait {settings.rate_limit_seconds - time_since_last} seconds."
         
         return None
-    
+
     @staticmethod
     async def _update_user_stats_by_user(db: AsyncSession, user_id: int, timestamp: int):
-        """Update user statistics by user ID"""
+        """Update user statistics for authenticated user"""
         result = await db.execute(
             select(UserStats).where(UserStats.user_id == user_id)
         )
-        user_stats = result.scalar_one_or_none()
+        user_stat = result.scalar_one_or_none()
         
-        if user_stats:
-            user_stats.pixels_placed += 1
-            user_stats.last_placed = timestamp
+        if user_stat:
+            user_stat.pixels_placed += 1
+            user_stat.last_placed = timestamp
         else:
-            user_stats = UserStats(
-                user_id=user_id,
+            user_stat = UserStats(
                 ip_address=None,
+                user_id=user_id,
                 pixels_placed=1,
                 last_placed=timestamp
             )
-            db.add(user_stats)
+            db.add(user_stat)
         
-        # Update active users
-        result = await db.execute(
-            select(ActiveUser).where(ActiveUser.user_id == user_id)
-        )
-        active_user = result.scalar_one_or_none()
-        
-        if active_user:
-            active_user.last_seen = timestamp
-        else:
-            active_user = ActiveUser(user_id=user_id, ip_address=None, last_seen=timestamp)
-            db.add(active_user)
-        
-        # Update user's total pixel count
-        result = await db.execute(
-            select(User).where(User.id == user_id)
-        )
-        user = result.scalar_one_or_none()
+        # Also update user's total pixel count
+        user_result = await db.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one_or_none()
         if user:
             user.total_pixels_placed += 1
 
     @staticmethod
     async def _update_user_stats_by_ip(db: AsyncSession, ip_address: str, timestamp: int):
-        """Update user statistics by IP address"""
+        """Update user statistics for anonymous user by IP"""
         result = await db.execute(
-            select(UserStats).where(cast(UserStats.ip_address, String) == ip_address)
+            select(UserStats).where(UserStats.ip_address == ip_address)
         )
-        user_stats = result.scalar_one_or_none()
+        user_stat = result.scalar_one_or_none()
         
-        if user_stats:
-            user_stats.pixels_placed += 1
-            user_stats.last_placed = timestamp
+        if user_stat:
+            user_stat.pixels_placed += 1
+            user_stat.last_placed = timestamp
         else:
-            user_stats = UserStats(
+            user_stat = UserStats(
                 ip_address=ip_address,
                 user_id=None,
                 pixels_placed=1,
                 last_placed=timestamp
             )
-            db.add(user_stats)
+            db.add(user_stat)
+
+    @staticmethod
+    async def _update_active_user(db: AsyncSession, ip_address: Optional[str], user_id: Optional[int], timestamp: int):
+        """Update active user tracking"""
+        if user_id:
+            result = await db.execute(
+                select(ActiveUser).where(ActiveUser.user_id == user_id)
+            )
+        else:
+            result = await db.execute(
+                select(ActiveUser).where(ActiveUser.ip_address == ip_address)
+            )
         
-        # Update active users
-        result = await db.execute(
-            select(ActiveUser).where(cast(ActiveUser.ip_address, String) == ip_address)
-        )
         active_user = result.scalar_one_or_none()
         
         if active_user:
             active_user.last_seen = timestamp
         else:
-            active_user = ActiveUser(ip_address=ip_address, user_id=None, last_seen=timestamp)
+            active_user = ActiveUser(ip_address=ip_address, user_id=user_id, last_seen=timestamp)
             db.add(active_user)
 
     @staticmethod
@@ -307,7 +321,7 @@ class StatsService:
             )
         else:
             result = await db.execute(
-                select(UserStats.pixels_placed, UserStats.last_placed).where(cast(UserStats.ip_address, String) == ip_address)
+                select(UserStats.pixels_placed, UserStats.last_placed).where(UserStats.ip_address == ip_address)
             )
         
         user_data = result.first()

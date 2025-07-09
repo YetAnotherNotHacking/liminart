@@ -1,7 +1,6 @@
 from sqlalchemy import create_engine, Column, Integer, SmallInteger, String, DateTime, Index, text, Boolean, LargeBinary, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.dialects.postgresql import INET
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import Session
 from datetime import datetime
@@ -31,8 +30,8 @@ class Pixel(Base):
     r = Column(SmallInteger, nullable=False)
     g = Column(SmallInteger, nullable=False)
     b = Column(SmallInteger, nullable=False)
-    ip_address = Column(INET, nullable=True)  # Made nullable for user pixels
-    user_id = Column(Integer, nullable=True)  # New user reference
+    ip_address = Column(String(45), nullable=True)  # Changed to String for IPv4/IPv6
+    user_id = Column(Integer, nullable=True)  # User reference
     last_updated = Column(Integer, nullable=False)
     
     # Computed tile coordinates
@@ -49,16 +48,18 @@ class Pixel(Base):
 class UserStats(Base):
     __tablename__ = "user_stats"
     
-    ip_address = Column(INET, primary_key=True, nullable=True)  # Made nullable
-    user_id = Column(Integer, primary_key=True, nullable=True)  # New user reference
+    id = Column(Integer, primary_key=True, autoincrement=True)  # Proper primary key
+    ip_address = Column(String(45), nullable=True)  # Changed to String
+    user_id = Column(Integer, nullable=True, unique=True)  # Unique for user stats
     pixels_placed = Column(Integer, default=0)
     last_placed = Column(Integer, nullable=True)
 
 class ActiveUser(Base):
     __tablename__ = "active_users"
     
-    ip_address = Column(INET, primary_key=True, nullable=True)  # Made nullable
-    user_id = Column(Integer, primary_key=True, nullable=True)  # New user reference
+    id = Column(Integer, primary_key=True, autoincrement=True)  # Proper primary key
+    ip_address = Column(String(45), nullable=True)  # Changed to String
+    user_id = Column(Integer, nullable=True, unique=True)  # Unique for active users
     last_seen = Column(Integer, nullable=False)
 
 class TileUpdate(Base):
@@ -88,7 +89,7 @@ class User(Base):
     
     # Statistics
     total_pixels_placed = Column(Integer, default=0)
-    registration_ip = Column(INET, nullable=True)
+    registration_ip = Column(String(45), nullable=True)  # Changed to String
 
 class EmailVerification(Base):
     __tablename__ = "email_verifications"
@@ -103,8 +104,11 @@ class EmailVerification(Base):
 # Database indexes for performance
 Index('idx_pixels_tile', Pixel.tile_x, Pixel.tile_y)
 Index('idx_pixels_user', Pixel.user_id)
+Index('idx_pixels_ip', Pixel.ip_address)
 Index('idx_user_stats_user', UserStats.user_id)
+Index('idx_user_stats_ip', UserStats.ip_address)
 Index('idx_active_users_user', ActiveUser.user_id)
+Index('idx_active_users_ip', ActiveUser.ip_address)
 
 async def get_db():
     async with async_session() as session:
