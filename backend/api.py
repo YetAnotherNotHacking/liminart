@@ -153,6 +153,31 @@ async def get_canvas_state(
         tiles=tiles
     )
 
+@router.post("/updates")
+async def get_updates(
+    since: Optional[int] = Query(None, description="Timestamp since last update"),
+    request: Request = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get canvas updates since timestamp (for real-time updates)"""
+    try:
+        # For now, return empty updates
+        # In a full implementation, you'd track changes and return incremental updates
+        return {
+            "success": True,
+            "pixels": [],  # No incremental updates yet
+            "changedTiles": {},  # No tile changes yet
+            "timestamp": int(time.time())
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "pixels": [],
+            "changedTiles": {},
+            "timestamp": int(time.time())
+        }
+
 @router.get("/stats", response_model=UserStatsResponse)
 async def get_stats(
     request: Request,
@@ -167,13 +192,29 @@ async def get_stats(
 
 @router.get("/canvas")
 async def export_canvas(
-    export_request: CanvasExportRequest = Depends(),
+    format: str = Query("json", description="Export format: json, png, or raw"),
     db: AsyncSession = Depends(get_db)
 ):
     """Export canvas data"""
-    # This is a simplified implementation
-    # In production, you'd want to implement proper export logic
-    raise HTTPException(status_code=501, detail="Canvas export not yet implemented")
+    try:
+        if format == "json":
+            # Get total pixel count for simple export
+            result = await db.execute(text("SELECT COUNT(*) FROM pixels"))
+            pixel_count = result.scalar() or 0
+            
+            return {
+                "success": True,
+                "format": "json",
+                "pixel_count": pixel_count,
+                "canvas_width": settings.canvas_width,
+                "canvas_height": settings.canvas_height,
+                "tile_size": settings.tile_size
+            }
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported format. Use 'json'.")
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
 
 # Utility endpoints
 @router.get("/ip")
