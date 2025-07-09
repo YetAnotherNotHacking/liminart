@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, text, delete, and_, or_, desc
+from sqlalchemy import select, func, text, delete, and_, or_, desc, cast, String
 from sqlalchemy.orm import Session
 from database import Pixel, UserStats, ActiveUser, TileUpdate, User, EmailVerification
 from models import PixelRequest, RawPixelRequest, UserStatsResponse, UserCreate, UserLogin, Token, UserProfile, UserStats as UserStatsModel
@@ -160,7 +160,7 @@ class PixelService:
     async def _check_ip_rate_limit(db: AsyncSession, ip_address: str) -> Optional[str]:
         """Check if IP is rate limited"""
         result = await db.execute(
-            select(UserStats.last_placed).where(UserStats.ip_address == ip_address)
+            select(UserStats.last_placed).where(cast(UserStats.ip_address, String) == ip_address)
         )
         last_placed = result.scalar_one_or_none()
         
@@ -215,7 +215,7 @@ class PixelService:
     async def _update_user_stats_by_ip(db: AsyncSession, ip_address: str, timestamp: int):
         """Update user statistics by IP address"""
         result = await db.execute(
-            select(UserStats).where(UserStats.ip_address == ip_address)
+            select(UserStats).where(cast(UserStats.ip_address, String) == ip_address)
         )
         user_stats = result.scalar_one_or_none()
         
@@ -233,7 +233,7 @@ class PixelService:
         
         # Update active users
         result = await db.execute(
-            select(ActiveUser).where(ActiveUser.ip_address == ip_address)
+            select(ActiveUser).where(cast(ActiveUser.ip_address, String) == ip_address)
         )
         active_user = result.scalar_one_or_none()
         
@@ -307,7 +307,7 @@ class StatsService:
             )
         else:
             result = await db.execute(
-                select(UserStats.pixels_placed, UserStats.last_placed).where(UserStats.ip_address == ip_address)
+                select(UserStats.pixels_placed, UserStats.last_placed).where(cast(UserStats.ip_address, String) == ip_address)
             )
         
         user_data = result.first()
@@ -321,7 +321,7 @@ class StatsService:
         # Get active users count
         cutoff_time = int(time.time()) - 3600  # Last hour
         result = await db.execute(
-            select(func.count(ActiveUser.ip_address)).where(ActiveUser.last_seen > cutoff_time)
+            select(func.count().distinct()).select_from(ActiveUser).where(ActiveUser.last_seen > cutoff_time)
         )
         active_users = result.scalar() or 0
         
